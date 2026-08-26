@@ -1,0 +1,118 @@
+@page "/agent"
+@rendermode InteractiveServer
+@inject AgentApiClient Api
+
+<PageTitle>Agent Chat</PageTitle>
+
+<h1>Agent Chat</h1>
+
+@if (checkingStatus)
+{
+    <p><em>Checking agent status...</em></p>
+}
+else if (!isConfigured)
+{
+    <div class="alert alert-warning">
+        The AI agent isn't configured yet — Azure OpenAI credentials haven't been set for AgentApi.
+        Once <code>AzureOpenAI:Endpoint</code>, <code>AzureOpenAI:ApiKey</code>, and <code>AzureOpenAI:DeploymentName</code>
+        are set via user-secrets, this page will connect automatically.
+    </div>
+}
+else
+{
+    <div class="border rounded p-3 mb-3" style="height: 420px; overflow-y: auto;">
+        @foreach (var message in messages)
+        {
+            <div class="mb-2 @(message.IsUser ? "text-end" : "text-start")">
+                <span class="badge @(message.IsUser ? "bg-primary" : "bg-secondary") mb-1">@(message.IsUser ? "You" : "Agent")</span>
+                <div class="d-inline-block p-2 rounded @(message.IsUser ? "bg-primary text-white" : "bg-light")" style="max-width: 75%; text-align: left; white-space: pre-wrap;">
+                    @message.Text@(message.IsStreaming ? "▌" : "")
+                </div>
+            </div>
+        }
+    </div>
+
+    <div class="input-group">
+        <input class="form-control" placeholder="Ask about customers, oil levels, or schedule a delivery..."
+               @bind="draft" @bind:event="oninput" @onkeydown="OnKeyDown" disabled="@sending" />
+        <TelerikButton ThemeColor="primary" OnClick="@SendAsync" Enabled="@(!sending && !string.IsNullOrWhiteSpace(draft))">Send</TelerikButton>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger mt-2">@errorMessage</div>
+    }
+}
+
+@code {
+    private bool checkingStatus = true;
+    private bool isConfigured;
+    private bool sending;
+    private string draft = "";
+    private readonly string conversationId = Guid.NewGuid().ToString();
+    private string? errorMessage;
+    private List<ChatMessageEntry> messages = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var status = await Api.GetStatusAsync();
+        isConfigured = status.IsConfigured;
+        checkingStatus = false;
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !sending && !string.IsNullOrWhiteSpace(draft))
+        {
+            await SendAsync();
+        }
+    }
+
+    private async Task SendAsync()
+    {
+        var text = draft.Trim();
+        if (string.IsNullOrEmpty(text) || sending) return;
+
+        errorMessage = null;
+        messages.Add(new ChatMessageEntry(text, isUser: true));
+        draft = "";
+        sending = true;
+
+        var assistantEntry = new ChatMessageEntry("", isUser: false) { IsStreaming = true };
+        messages.Add(assistantEntry);
+        StateHasChanged();
+
+        try
+        {
+            await foreach (var chunk in Api.StreamMessageAsync(text, conversationId))
+            {
+                assistantEntry.Text += chunk;
+                StateHasChanged();
+            }
+
+            if (string.IsNullOrEmpty(assistantEntry.Text))
+            {
+                messages.Remove(assistantEntry);
+                errorMessage = "The agent didn't return a response.";
+            }
+        }
+        catch (Exception)
+        {
+            messages.Remove(assistantEntry);
+            errorMessage = "The agent didn't respond. It may not be configured, or a request failed.";
+        }
+        finally
+        {
+            assistantEntry.IsStreaming = false;
+            sending = false;
+            StateHasChanged();
+        }
+    }
+
+    private class ChatMessageEntry(string text, bool isUser)
+    {
+        public string Text { get; set; } = text;
+        public bool IsUser { get; } = isUser;
+        public bool IsStreaming { get; set; }
+    }
+}

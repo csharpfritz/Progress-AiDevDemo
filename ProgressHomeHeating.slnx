@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="ProgressHomeHeating.Web/ProgressHomeHeating.Web.csproj" />
+  <Project Path="ServiceDefaults/ServiceDefaults.csproj" />
+  <Project Path="ProgressHomeHeating.Contracts/ProgressHomeHeating.Contracts.csproj" />
+  <Project Path="ProgressHomeHeating.OperationsApi/ProgressHomeHeating.OperationsApi.csproj" />
+  <Project Path="ProgressHomeHeating.AgentApi/ProgressHomeHeating.AgentApi.csproj" />
+</Solution>

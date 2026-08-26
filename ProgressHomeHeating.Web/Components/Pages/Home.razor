@@ -1,0 +1,131 @@
+@page "/"
+@rendermode InteractiveServer
+@inject OperationsApiClient Api
+
+<PageTitle>Dashboard</PageTitle>
+
+<h1>Progress Home Heating Oil — Dashboard</h1>
+
+@if (loading)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <div class="row mb-4 g-4">
+        <div class="col-md-6">
+            <div class="surface-card h-100">
+                <h4>Tank Levels — Customers Below 30%</h4>
+                <TelerikChart>
+                    <ChartSeriesItems>
+                        <ChartSeries Type="ChartSeriesType.Bar"
+                                     Data="@lowTanks"
+                                     Field="@nameof(OilTankDto.CurrentLevelPercent)"
+                                     CategoryField="@nameof(OilTankDto.CustomerName)"
+                                     Name="Current Level %"
+                                     Color="#5ce500">
+                        </ChartSeries>
+                    </ChartSeriesItems>
+                    <ChartCategoryAxes>
+                        <ChartCategoryAxis></ChartCategoryAxis>
+                    </ChartCategoryAxes>
+                    <ChartValueAxes>
+                        <ChartValueAxis Min="0">
+                            <ChartValueAxisPlotBands>
+                                <ChartValueAxisPlotBand From="0" To="30" Color="#dc3545" Opacity="0.12" />
+                                <ChartValueAxisPlotBand From="29.6" To="30" Color="#dc3545" Opacity="0.9" />
+                            </ChartValueAxisPlotBands>
+                        </ChartValueAxis>
+                    </ChartValueAxes>
+                    <ChartTitle Text="Low Oil Tanks"></ChartTitle>
+                    <ChartLegend Visible="false"></ChartLegend>
+                </TelerikChart>
+            </div>
+        </div>
+        <div class="col-md-6 d-flex flex-column h-100 gap-4">
+            <div class="surface-card">
+                <h4>Fleet Summary</h4>
+                <ul class="mb-0">
+                    <li>@customerCount customers</li>
+                    <li>@lowTanks.Count tanks below 30%</li>
+                    <li>@upcomingOrders.Count upcoming deliveries</li>
+                </ul>
+            </div>
+            <div class="surface-card flex-grow-1">
+                <h4>Local Weather — 5-Day Report</h4>
+                <div class="weather-strip">
+                    @foreach (var day in forecast)
+                    {
+                        <div class="weather-day">
+                            <div class="weather-day-name">@day.DayName</div>
+                            <div class="weather-icon" aria-hidden="true">@day.Icon</div>
+                            <div class="weather-condition">@day.Condition</div>
+                            <div class="weather-temps">
+                                <span class="weather-high">@day.HighF&deg;</span>
+                                <span class="weather-low">@day.LowF&deg;</span>
+                            </div>
+                        </div>
+                    }
+                </div>
+                <p class="weather-footnote mb-0">Cold today, colder tomorrow — great week to top off tanks. ❄️</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="surface-card">
+        <h4>Upcoming Deliveries</h4>
+        <TelerikGrid Data="@upcomingOrders" Sortable="true" Pageable="true" PageSize="10">
+            <GridColumns>
+                <GridColumn Field="@nameof(DeliveryOrderDto.CustomerName)" Title="Customer" />
+                <GridColumn Field="@nameof(DeliveryOrderDto.ScheduledDate)" Title="Scheduled" DisplayFormat="{0:d}" />
+                <GridColumn Field="@nameof(DeliveryOrderDto.Status)" Title="Status" />
+                <GridColumn Field="@nameof(DeliveryOrderDto.GallonsRequested)" Title="Gallons Requested" />
+                <GridColumn Field="@nameof(DeliveryOrderDto.DriverName)" Title="Driver" />
+            </GridColumns>
+        </TelerikGrid>
+    </div>
+}
+
+@code {
+    private bool loading = true;
+    private int customerCount;
+    private List<OilTankDto> lowTanks = [];
+    private List<DeliveryOrderDto> upcomingOrders = [];
+    private List<WeatherDayForecast> forecast = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var customers = await Api.GetCustomersAsync();
+        customerCount = customers.Count;
+        lowTanks = await Api.GetLowTanksAsync(30);
+        var allOrders = await Api.GetOrdersAsync(from: DateOnly.FromDateTime(DateTime.Today));
+        upcomingOrders = allOrders.OrderBy(o => o.ScheduledDate).ToList();
+        forecast = BuildFiveDayForecast();
+        loading = false;
+    }
+
+    // Demo data for a heating-oil company: always cold, and trending colder
+    // as the week goes on, to make the case for topping off tanks now.
+    private static List<WeatherDayForecast> BuildFiveDayForecast()
+    {
+        (string Icon, string Condition, int High, int Low)[] days =
+        [
+            ("🌥️", "Chilly & overcast", 28, 19),
+            ("❄️", "Light snow showers", 24, 14),
+            ("🌨️", "Snow likely", 19, 8),
+            ("🥶", "Bitter cold snap", 12, -2),
+            ("⛄", "Deep freeze", 6, -9),
+        ];
+
+        var today = DateTime.Today;
+        return days.Select((d, i) => new WeatherDayForecast(
+            today.AddDays(i).ToString("ddd"),
+            d.Icon,
+            d.Condition,
+            d.High,
+            d.Low
+        )).ToList();
+    }
+
+    private sealed record WeatherDayForecast(string DayName, string Icon, string Condition, int HighF, int LowF);
+}

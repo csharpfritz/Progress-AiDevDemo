@@ -1,0 +1,244 @@
+@page "/dispatch"
+@rendermode InteractiveServer
+@inject OperationsApiClient Api
+@inject AgentApiClient AgentApi
+
+<PageTitle>Dispatch Console</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="mb-0">Dispatch Console</h1>
+    @if (!checkingStatus && isConfigured)
+    {
+        <div>
+            @if (confirmingReset)
+            {
+                <span class="me-2 text-muted small">Remove every delivery the agent has scheduled?</span>
+                <TelerikButton ThemeColor="error" Size="sm" OnClick="@ResetAgentDataAsync" Enabled="@(!resetting)">Yes, reset</TelerikButton>
+                <TelerikButton FillMode="flat" Size="sm" OnClick="@(() => confirmingReset = false)" Enabled="@(!resetting)">Cancel</TelerikButton>
+            }
+            else
+            {
+                <TelerikButton FillMode="outline" ThemeColor="error" Size="sm" OnClick="@(() => confirmingReset = true)">Reset Demo Data</TelerikButton>
+            }
+        </div>
+    }
+</div>
+
+@if (resetMessage is not null)
+{
+    <div class="alert alert-success">@resetMessage</div>
+}
+
+@if (checkingStatus)
+{
+    <p><em>Checking agent status...</em></p>
+}
+else if (!isConfigured)
+{
+    <div class="alert alert-warning">
+        The AI agent isn't configured yet — Azure OpenAI credentials haven't been set for AgentApi.
+        Once <code>AzureOpenAI:Endpoint</code>, <code>AzureOpenAI:ApiKey</code>, and <code>AzureOpenAI:DeploymentName</code>
+        are set via user-secrets, this page will connect automatically.
+    </div>
+}
+else
+{
+    <div class="row mb-4 g-4">
+        <div class="col-md-6">
+            <div class="surface-card h-100">
+                <h4>Tanks Needing Attention</h4>
+                @if (lowTanks.Count == 0)
+                {
+                    <p class="text-muted mb-0">No tanks are currently at or below 30%.</p>
+                }
+                else
+                {
+                    <table class="table table-sm mb-0">
+                        <thead>
+                            <tr>
+                                <th>Customer</th>
+                                <th>Level</th>
+                                <th>Tank Size</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var tank in lowTanks)
+                            {
+                                <tr>
+                                    <td>@tank.CustomerName</td>
+                                    <td class="@(tank.CurrentLevelPercent < 15 ? "text-danger fw-semibold" : "")">@tank.CurrentLevelPercent.ToString("0")%</td>
+                                    <td>@tank.SizeGallons gal</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="surface-card h-100">
+                <h4>Run Dispatch Sweep</h4>
+                <p class="text-muted">
+                    The agent will review tanks below 30% and schedule deliveries where needed.
+                    Optionally, give it direction below.
+                </p>
+                <textarea class="form-control mb-3" rows="3"
+                          placeholder="Optional direction, e.g. 'only schedule for customers below 15%' or 'prioritize the largest tanks'"
+                          @bind="direction" disabled="@running"></textarea>
+                <TelerikButton ThemeColor="primary" OnClick="@RunSweepAsync" Enabled="@(!running)">
+                    @(running ? "Running..." : "Run Dispatch Sweep")
+                </TelerikButton>
+            </div>
+        </div>
+    </div>
+
+    <div class="surface-card mb-4">
+        <h4>Latest Run Report</h4>
+        @if (errorMessage is not null)
+        {
+            <div class="alert alert-danger">@errorMessage</div>
+        }
+        else if (reportTimestamp is null && !running)
+        {
+            <p class="text-muted mb-0">No dispatch runs yet this session.</p>
+        }
+        else
+        {
+            @if (reportTimestamp is not null)
+            {
+                <p class="text-muted small mb-2">Last run: @reportTimestamp.Value.ToString("t")</p>
+            }
+            <div style="white-space: pre-wrap;">@reportText@(running ? "▌" : "")</div>
+        }
+    </div>
+
+    <div class="surface-card">
+        <h4>Upcoming Deliveries</h4>
+        <TelerikGrid Data="@upcomingOrders" Sortable="true" Pageable="true" PageSize="10">
+            <GridColumns>
+                <GridColumn Field="@nameof(DeliveryOrderDto.CustomerName)" Title="Customer" />
+                <GridColumn Field="@nameof(DeliveryOrderDto.ScheduledDate)" Title="Scheduled" DisplayFormat="{0:d}" />
+                <GridColumn Field="@nameof(DeliveryOrderDto.Status)" Title="Status" />
+                <GridColumn Field="@nameof(DeliveryOrderDto.GallonsRequested)" Title="Gallons Requested" />
+                <GridColumn Field="@nameof(DeliveryOrderDto.DriverName)" Title="Driver" />
+            </GridColumns>
+        </TelerikGrid>
+    </div>
+}
+
+@code {
+    private const string SweepInstruction = """
+        Run a dispatch sweep: review customers whose oil tank level is at or below 30%,
+        and schedule a delivery for any that need one, sized appropriately for their tank.
+        Summarize what you found and what deliveries you scheduled (or recommend scheduling
+        manually, and why) in a short report. Respond in plain text only — do not use
+        markdown formatting such as #, *, or _.
+        """;
+
+    private bool checkingStatus = true;
+    private bool isConfigured;
+    private bool running;
+    private string direction = "";
+    private string reportText = "";
+    private DateTime? reportTimestamp;
+    private string? errorMessage;
+    private bool confirmingReset;
+    private bool resetting;
+    private string? resetMessage;
+    private List<OilTankDto> lowTanks = [];
+    private List<DeliveryOrderDto> upcomingOrders = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var status = await AgentApi.GetStatusAsync();
+        isConfigured = status.IsConfigured;
+        checkingStatus = false;
+
+        if (isConfigured)
+        {
+            await RefreshOperationalDataAsync();
+        }
+    }
+
+    private async Task RefreshOperationalDataAsync()
+    {
+        lowTanks = await Api.GetLowTanksAsync(30);
+        var allOrders = await Api.GetOrdersAsync(from: DateOnly.FromDateTime(DateTime.Today));
+        upcomingOrders = allOrders.OrderBy(o => o.ScheduledDate).ToList();
+    }
+
+    private async Task RunSweepAsync()
+    {
+        if (running) return;
+
+        running = true;
+        errorMessage = null;
+        resetMessage = null;
+        reportText = "";
+        StateHasChanged();
+
+        var conversationId = Guid.NewGuid().ToString();
+        var instruction = string.IsNullOrWhiteSpace(direction)
+            ? SweepInstruction
+            : $"{SweepInstruction}\n\nAdditional direction from the dispatch manager: {direction.Trim()}";
+
+        try
+        {
+            await foreach (var chunk in AgentApi.StreamMessageAsync(instruction, conversationId))
+            {
+                reportText += chunk;
+                StateHasChanged();
+            }
+
+            if (string.IsNullOrWhiteSpace(reportText))
+            {
+                errorMessage = "The agent didn't return a response.";
+            }
+            else
+            {
+                reportTimestamp = DateTime.Now;
+            }
+        }
+        catch (Exception)
+        {
+            errorMessage = "The dispatch run failed. The agent may not be configured, or a request failed.";
+        }
+        finally
+        {
+            running = false;
+            await RefreshOperationalDataAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task ResetAgentDataAsync()
+    {
+        if (resetting) return;
+
+        resetting = true;
+        StateHasChanged();
+
+        try
+        {
+            var deleted = await Api.ResetAgentOrdersAsync();
+            resetMessage = deleted == 0
+                ? "No agent-scheduled deliveries to remove."
+                : $"Removed {deleted} agent-scheduled {(deleted == 1 ? "delivery" : "deliveries")}. Ready to re-run the demo.";
+            reportText = "";
+            reportTimestamp = null;
+            errorMessage = null;
+            await RefreshOperationalDataAsync();
+        }
+        catch (Exception)
+        {
+            resetMessage = null;
+            errorMessage = "Failed to reset demo data.";
+        }
+        finally
+        {
+            resetting = false;
+            confirmingReset = false;
+            StateHasChanged();
+        }
+    }
+}

@@ -1,0 +1,55 @@
+@page "/customers"
+@rendermode InteractiveServer
+@inject OperationsApiClient Api
+
+<PageTitle>Customers</PageTitle>
+
+<h1>Customers</h1>
+
+@if (loading)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <div class="surface-card">
+        <TelerikGrid Data="@rows" Sortable="true" FilterMode="@GridFilterMode.FilterRow" Pageable="true" PageSize="15">
+            <GridColumns>
+                <GridColumn Field="@nameof(CustomerRow.Name)" Title="Name" />
+                <GridColumn Field="@nameof(CustomerRow.Email)" Title="Email" />
+                <GridColumn Field="@nameof(CustomerRow.Phone)" Title="Phone" />
+                <GridColumn Field="@nameof(CustomerRow.Address)" Title="Service Address" />
+                <GridColumn Field="@nameof(CustomerRow.TankLevel)" Title="Tank Level %" />
+                <GridColumn Field="@nameof(CustomerRow.TankSize)" Title="Tank Size (gal)" />
+            </GridColumns>
+        </TelerikGrid>
+    </div>
+}
+
+@code {
+    private bool loading = true;
+    private List<CustomerRow> rows = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var customers = await Api.GetCustomersAsync();
+        var tanks = await Api.GetTanksAsync();
+        var tanksByCustomer = tanks.ToLookup(t => t.CustomerId);
+
+        rows = customers.Select(c =>
+        {
+            var tank = tanksByCustomer[c.Id].FirstOrDefault();
+            return new CustomerRow(
+                c.Name,
+                c.Email,
+                c.Phone,
+                $"{c.ServiceAddress.Street}, {c.ServiceAddress.City}, {c.ServiceAddress.State} {c.ServiceAddress.Zip}",
+                tank?.CurrentLevelPercent,
+                tank?.SizeGallons);
+        }).ToList();
+
+        loading = false;
+    }
+
+    private record CustomerRow(string Name, string Email, string Phone, string Address, double? TankLevel, int? TankSize);
+}

@@ -1,0 +1,157 @@
+@page "/scheduler"
+@rendermode InteractiveServer
+@inject OperationsApiClient Api
+
+<PageTitle>Delivery Scheduler</PageTitle>
+
+<h1>Delivery Scheduler</h1>
+
+@if (loading)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <div class="surface-card">
+        <TelerikScheduler Data="@appointments"
+                           @bind-Date="@selectedDate"
+                           Height="600px"
+                           OnUpdate="@OnAppointmentUpdate">
+            <SchedulerViews>
+                <SchedulerMonthView />
+                <SchedulerWeekView />
+                <SchedulerDayView />
+            </SchedulerViews>
+        </TelerikScheduler>
+    </div>
+
+    <div class="surface-card" style="max-width: 640px;">
+        <h4>Schedule New Delivery</h4>
+
+            <div class="mb-2">
+                <label>Customer</label>
+                <TelerikDropDownList Data="@customers"
+                                     TextField="@nameof(CustomerDto.Name)"
+                                     ValueField="@nameof(CustomerDto.Id)"
+                                     @bind-Value="@newOrderCustomerId"
+                                     Width="100%" />
+            </div>
+
+            <div class="mb-2">
+                <label>Scheduled Date</label>
+                <TelerikDatePicker @bind-Value="@newOrderDate" Width="100%" />
+            </div>
+
+            <div class="mb-2">
+                <label>Gallons Requested</label>
+                <TelerikNumericTextBox @bind-Value="@newOrderGallons" Min="50" Max="2000" Width="100%" />
+            </div>
+
+            <div class="mb-2">
+                <label>Driver (optional — leave blank to just request)</label>
+                <TelerikDropDownList Data="@drivers"
+                                     TextField="@nameof(DriverDto.Name)"
+                                     ValueField="@nameof(DriverDto.Id)"
+                                     @bind-Value="@newOrderDriverId"
+                                     DefaultText="Unassigned"
+                                     Width="100%" />
+            </div>
+
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="alert alert-danger">@errorMessage</div>
+            }
+
+            <TelerikButton ThemeColor="primary" OnClick="@SubmitNewOrderAsync">Schedule Delivery</TelerikButton>
+    </div>
+}
+
+@code {
+    private bool loading = true;
+    private DateTime selectedDate = DateTime.Today;
+    private List<SchedulerAppointment> appointments = [];
+    private List<CustomerDto> customers = [];
+    private List<OilTankDto> tanks = [];
+    private List<DriverDto> drivers = [];
+    private string? errorMessage;
+
+    private Guid newOrderCustomerId;
+    private DateTime newOrderDate = DateTime.Today.AddDays(1);
+    private double newOrderGallons = 150;
+    private Guid? newOrderDriverId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        loading = false;
+    }
+
+    private async Task LoadAsync()
+    {
+        customers = await Api.GetCustomersAsync();
+        tanks = await Api.GetTanksAsync();
+        drivers = await Api.GetDriversAsync();
+
+        var orders = await Api.GetOrdersAsync();
+        appointments = orders.Select(o => new SchedulerAppointment
+        {
+            OrderId = o.Id,
+            Title = $"{o.CustomerName} — {o.GallonsRequested} gal ({o.Status})",
+            Start = o.ScheduledDate.ToDateTime(TimeOnly.MinValue),
+            End = o.ScheduledDate.ToDateTime(TimeOnly.MinValue),
+            IsAllDay = true
+        }).ToList();
+    }
+
+    private async Task OnAppointmentUpdate(SchedulerUpdateEventArgs args)
+    {
+        if (args.Item is SchedulerAppointment appt)
+        {
+            await Api.UpdateOrderAsync(appt.OrderId, new UpdateDeliveryOrderRequest(
+                ScheduledDate: DateOnly.FromDateTime(appt.Start),
+                Status: null,
+                DriverId: null,
+                TruckId: null,
+                GallonsDelivered: null));
+            await LoadAsync();
+        }
+    }
+
+    private async Task SubmitNewOrderAsync()
+    {
+        errorMessage = null;
+        if (newOrderCustomerId == Guid.Empty)
+        {
+            errorMessage = "Please select a customer.";
+            return;
+        }
+
+        var tank = tanks.FirstOrDefault(t => t.CustomerId == newOrderCustomerId);
+        if (tank is null)
+        {
+            errorMessage = "This customer has no tank on file.";
+            return;
+        }
+
+        await Api.CreateOrderAsync(new CreateDeliveryOrderRequest(
+            CustomerId: newOrderCustomerId,
+            TankId: tank.Id,
+            ScheduledDate: DateOnly.FromDateTime(newOrderDate),
+            GallonsRequested: (int)newOrderGallons,
+            DriverId: newOrderDriverId,
+            TruckId: null));
+
+        newOrderCustomerId = Guid.Empty;
+        newOrderDriverId = null;
+        await LoadAsync();
+    }
+
+    private class SchedulerAppointment
+    {
+        public Guid OrderId { get; set; }
+        public string Title { get; set; } = "";
+        public DateTime Start { get; set; }
+        public DateTime End { get; set; }
+        public bool IsAllDay { get; set; }
+    }
+}

@@ -1,0 +1,70 @@
+# Nia toolchain configuration
+# This file tells AI agents what tools are available and how to access them
+#
+# To switch access methods for a tool:
+#   1. Comment out the current 'description' field (add # prefix to each line)
+#   2. Uncomment your preferred method's description block
+#   3. Update the 'method' field to match the new method
+schema_version = "1.0.0"
+
+# Issue tracker configuration
+[issue_tracker]
+name = "local"
+type = "built-in"
+method = "local"  # Only supported method for local tools
+description = """
+Local markdown files for issue tracking.
+No external API or CLI access required.
+
+Issue descriptions are read from local files at:
+  .nia/work/job_{{issue_id}}/issue/issue.md
+
+Setup:
+1. Set issue ID via NIA_ISSUE_ID environment variable or .nia/context.toml
+2. Create the issue directory: mkdir -p .nia/work/job_{{issue_id}}/issue
+3. Create issue.md with your issue description in markdown format
+
+Note: You must select an issue ID that won't conflict with any online issue trackers or pull requests.
+
+Supported issue ID formats:
+- Numeric: 123
+- Alphanumeric: FEAT-123, TASK-42, my-feature
+- Maximum length: 100 characters
+
+Limitations:
+- No automatic issue synchronization
+- No status tracking (issues are static documents)
+- No labels, assignees, or metadata
+"""
+
+# Code platform configuration
+[code_platform]
+name = "local"
+type = "built-in"
+method = "local"  # Only supported method for local tools
+description = """
+Local Git branches for code management.
+No external platform integration required.
+
+PR operations work with local branches only:
+- Branch creation uses local Git commands
+- No remote PR creation or merge operations
+- PR ID is a conceptual identifier for tracking purposes
+
+Setup:
+1. Set PR ID via NIA_PR_ID environment variable or .nia/context.toml
+2. PR ID is used for branch naming and organization only
+
+Common Git operations:
+- Commit: git commit -m "message"
+- Merge locally: git merge {branch}
+
+Note: All operations are local. There is no integration with remote Git hosting platforms.
+
+Limitations:
+- No remote PR creation
+- No code review integration
+- No CI/CD pipeline triggers
+- No merge request workflows
+"""
+

@@ -1,0 +1,120 @@
+/* Progress Home Heating Oil — brand theme
+   Accent color is Progress Software's brand green (#5CE500). */
+
+:root {
+    --brand-green: #5ce500;
+    --brand-green-ink: #1c3a00;
+    --brand-ink: #14181c;
+    --brand-ink-soft: #1f2530;
+    --brand-surface: #f5f7f6;
+    --brand-border: #e3e7e4;
+
+    /* Retheme every Telerik/Kendo component from this one variable. */
+    --kendo-color-primary: var(--brand-green);
+
+    /* Retheme Bootstrap utility classes (bg-primary/text-primary/etc). */
+    --bs-primary: var(--brand-green);
+    --bs-primary-rgb: 92, 229, 0;
+    --bs-link-color: #2f7a00;
+    --bs-link-color-rgb: 47, 122, 0;
+    --bs-link-hover-color: #245e00;
+    --bs-body-font-family: "Segoe UI", "Segoe UI Variable", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+    --bs-body-bg: var(--brand-surface);
+}
+
+html, body {
+    background-color: var(--brand-surface);
+}
+
+a, .btn-link {
+    color: #2f7a00;
+}
+
+.btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-check-input:focus {
+    box-shadow: 0 0 0 0.1rem white, 0 0 0 0.25rem rgba(92, 229, 0, 0.55);
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+/* Lightweight elevated container used to group dashboard/page content. */
+.surface-card {
+    background: #fff;
+    border: 1px solid var(--brand-border);
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    box-shadow: 0 1px 2px rgba(20, 24, 28, 0.04);
+}
+
+.surface-card + .surface-card {
+    margin-top: 1.5rem;
+}
+
+.weather-strip {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: space-between;
+}
+
+.weather-day {
+    flex: 1 1 0;
+    text-align: center;
+    padding: 0.65rem 0.4rem;
+    border-radius: 10px;
+    background: linear-gradient(180deg, #eef6fb 0%, #f5f7f6 100%);
+    border: 1px solid var(--brand-border);
+}
+
+.weather-day-name {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--brand-ink-soft);
+}
+
+.weather-icon {
+    font-size: 1.75rem;
+    line-height: 1.4;
+}
+
+.weather-condition {
+    font-size: 0.72rem;
+    color: #4a5568;
+    min-height: 2rem;
+}
+
+.weather-temps {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.weather-high {
+    color: var(--brand-ink);
+}
+
+.weather-low {
+    color: #0d6efd;
+    margin-left: 0.35rem;
+}
+
+.weather-footnote {
+    margin-top: 0.75rem;
+    font-size: 0.85rem;
+    color: #4a5568;
+    font-style: italic;
+}
+
+.brand-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 7px;
+    background: var(--brand-green);
+    color: var(--brand-green-ink);
+    font-weight: 700;
+    font-size: 0.95rem;
+    flex-shrink: 0;
+}
