@@ -1,6 +1,30 @@
 @ProgressHomeHeating.OperationsApi_HostAddress = http://localhost:5233
+@host = {{ProgressHomeHeating.OperationsApi_HostAddress}}
 
 GET {{ProgressHomeHeating.OperationsApi_HostAddress}}/weatherforecast/
 Accept: application/json
+
+###
+
+# Get all orders
+GET {{host}}/api/orders
+Accept: application/json
+
+###
+
+# Get a specific order
+@orderId = 00000000-0000-0000-0000-000000000000
+GET {{host}}/api/orders/{{orderId}}
+Accept: application/json
+
+###
+
+# Complete a delivery order
+POST {{host}}/api/orders/{{orderId}}/complete
+Content-Type: application/json
+
+{
+    "gallonsDelivered": 150
+}
 
 ###
