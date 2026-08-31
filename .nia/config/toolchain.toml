@@ -9,62 +9,137 @@ schema_version = "1.0.0"
 
 # Issue tracker configuration
 [issue_tracker]
-name = "local"
+name = "github_issues"
 type = "built-in"
-method = "local"  # Only supported method for local tools
+method = "skill"  # Options: "cli", "mcp", "api", "skill" (default)
 description = """
-Local markdown files for issue tracking.
-No external API or CLI access required.
-
-Issue descriptions are read from local files at:
-  .nia/work/job_{{issue_id}}/issue/issue.md
-
-Setup:
-1. Set issue ID via NIA_ISSUE_ID environment variable or .nia/context.toml
-2. Create the issue directory: mkdir -p .nia/work/job_{{issue_id}}/issue
-3. Create issue.md with your issue description in markdown format
-
-Note: You must select an issue ID that won't conflict with any online issue trackers or pull requests.
-
-Supported issue ID formats:
-- Numeric: 123
-- Alphanumeric: FEAT-123, TASK-42, my-feature
-- Maximum length: 100 characters
-
-Limitations:
-- No automatic issue synchronization
-- No status tracking (issues are static documents)
-- No labels, assignees, or metadata
+When retrieving or reading issues from the issue tracker, use the "{{issue_tracker_skill_name}}" skill.
+This skill provides guidance on authentication, commands, error handling, and workflow
+best practices for your configured issue tracker.
 """
+
+# [CLI Method]:
+# description = """
+# GitHub Issues for task and bug tracking.
+# Access via 'gh issue' CLI commands.
+#
+# {{#if issue_tracker_repo_slug}}Repository: {{issue_tracker_repo_slug}}
+#
+# Common operations (repository configured — use --repo flag):
+# - List issues:   gh issue list --repo {{issue_tracker_repo_slug}}
+# - View issue:    gh issue view {{issue_id}} --repo {{issue_tracker_repo_slug}}
+# - Create issue:  gh issue create --title "..." --body "..." --repo {{issue_tracker_repo_slug}}
+# - Update issue:  gh issue edit {{issue_id}} --title "..." --repo {{issue_tracker_repo_slug}}
+# {{/if}}
+# {{#unless issue_tracker_repo_slug}}Common operations:
+# - List issues:   gh issue list
+# - View issue:    gh issue view {{issue_id}}
+# - Create issue:  gh issue create --title "..." --body "..."
+# - Update issue:  gh issue edit {{issue_id}} --title "..."
+# {{/unless}}
+# """
+
+# [MCP Method]:
+# description = """
+# GitHub Issues for task and bug tracking.
+# Access via GitHub MCP Server.
+# The MCP server provides tools for listing, viewing, and managing issues.
+# All authentication is handled by the MCP server configuration.
+# """
+
+# [API Method]:
+# description = """
+# GitHub Issues for task and bug tracking.
+# Access via GitHub REST API.
+#
+# Authentication: API token required
+# - Environment variable: NIA_ISSUE_TOKEN
+# - Scope: Read and write access to repository issues
+# - Management: User-managed; set externally before running Nia
+# - Security: Nia does not inject tokens into logs, traces, or prompts
+#
+# The Coding Agent will read this token dynamically when making API calls.
+#
+# Repository placeholders: {{issue_tracker_repo_owner}}/{{issue_tracker_repo_name}}
+#
+# Common operations:
+# - List issues: GET /repos/{{issue_tracker_repo_owner}}/{{issue_tracker_repo_name}}/issues
+# - View issue: GET /repos/{{issue_tracker_repo_owner}}/{{issue_tracker_repo_name}}/issues/{{issue_id}}
+# - Create issue: POST /repos/{{issue_tracker_repo_owner}}/{{issue_tracker_repo_name}}/issues
+# - Update issue: PATCH /repos/{{issue_tracker_repo_owner}}/{{issue_tracker_repo_name}}/issues/{{issue_id}}
+# - Close issue: PATCH /repos/{{issue_tracker_repo_owner}}/{{issue_tracker_repo_name}}/issues/{{issue_id}} (set state: closed)
+#
+# Note: When repository placeholders are empty (not configured), use auto-detected repository information from Git remote.
+# """
 
 # Code platform configuration
 [code_platform]
-name = "local"
+name = "github"
 type = "built-in"
-method = "local"  # Only supported method for local tools
+method = "skill"  # Options: "cli", "mcp", "api", "skill" (default)
 description = """
-Local Git branches for code management.
-No external platform integration required.
-
-PR operations work with local branches only:
-- Branch creation uses local Git commands
-- No remote PR creation or merge operations
-- PR ID is a conceptual identifier for tracking purposes
-
-Setup:
-1. Set PR ID via NIA_PR_ID environment variable or .nia/context.toml
-2. PR ID is used for branch naming and organization only
-
-Common Git operations:
-- Commit: git commit -m "message"
-- Merge locally: git merge {branch}
-
-Note: All operations are local. There is no integration with remote Git hosting platforms.
-
-Limitations:
-- No remote PR creation
-- No code review integration
-- No CI/CD pipeline triggers
-- No merge request workflows
+When retrieving or reading pull requests from the code platform, use the "{{code_platform_skill_name}}" skill.
+This skill provides guidance on PR navigation, review status, diff inspection,
+and code platform best practices.
 """
+
+# [CLI Method]:
+# description = """
+# GitHub for code hosting and collaboration.
+# Access via 'gh' CLI commands.
+#
+# {{#if code_platform_repo_slug}}Repository: {{code_platform_repo_slug}}
+#
+# Common operations (repository configured — use --repo flag):
+# - Create PR: gh pr create --title "..." --body "..." --repo {{code_platform_repo_slug}}
+# - View PR: gh pr view {{pr_id}} --repo {{code_platform_repo_slug}}
+# - List PRs: gh pr list --repo {{code_platform_repo_slug}}
+# - Review PR: gh pr review {{pr_id}} --repo {{code_platform_repo_slug}}
+# - Merge PR: gh pr merge {{pr_id}} --repo {{code_platform_repo_slug}}
+# - View repo: gh repo view --repo {{code_platform_repo_slug}}
+# {{/if}}
+# {{#unless code_platform_repo_slug}}Common operations:
+# - Create PR: gh pr create --title "..." --body "..."
+# - View PR: gh pr view {{pr_id}}
+# - List PRs: gh pr list
+# - Review PR: gh pr review {{pr_id}}
+# - Merge PR: gh pr merge {{pr_id}}
+# - View repo: gh repo view
+# {{/unless}}
+# """
+
+# [MCP Method]:
+# description = """
+# GitHub for code hosting and collaboration.
+# Access via GitHub MCP Server.
+# The MCP server provides comprehensive tools for repository operations including pull requests, code reviews, branches, and commits.
+# All authentication is handled by the MCP server configuration.
+# """
+
+# [API Method]:
+# description = """
+# GitHub for code hosting and collaboration.
+# Access via GitHub REST API.
+#
+# Authentication: API token required
+# - Environment variable: NIA_CODE_TOKEN
+# - Scope: Read and write access to repositories, pull requests, and code
+# - Management: User-managed; set externally before running Nia
+# - Security: Nia does not inject tokens into logs, traces, or prompts
+#
+# The Coding Agent will read this token dynamically when making API calls.
+#
+# Repository placeholders: {{code_platform_repo_owner}}/{{code_platform_repo_name}}
+#
+# Common operations:
+# - List PRs: GET /repos/{{code_platform_repo_owner}}/{{code_platform_repo_name}}/pulls
+# - View PR: GET /repos/{{code_platform_repo_owner}}/{{code_platform_repo_name}}/pulls/{{pr_id}}
+# - Create PR: POST /repos/{{code_platform_repo_owner}}/{{code_platform_repo_name}}/pulls
+# - Update PR: PATCH /repos/{{code_platform_repo_owner}}/{{code_platform_repo_name}}/pulls/{{pr_id}}
+# - Merge PR: PUT /repos/{{code_platform_repo_owner}}/{{code_platform_repo_name}}/pulls/{{pr_id}}/merge
+# - List commits: GET /repos/{{code_platform_repo_owner}}/{{code_platform_repo_name}}/commits
+# - Get repo: GET /repos/{{code_platform_repo_owner}}/{{code_platform_repo_name}}
+#
+# Note: When repository placeholders are empty (not configured), use auto-detected repository information from Git remote.
+# """
 

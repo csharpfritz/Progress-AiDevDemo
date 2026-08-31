@@ -2,15 +2,15 @@ schema_version = "1.0.0"
 
 [project]
 name = "Progress.DevAiDemos"
-description = "A home heating oil company demo application"
+description = "A sample project that uses Aspire, Blazor, Microsoft Agent Framework and Progress Observability"
 language = "csharp"  # Change to your primary language
-framework = "blazor"  # Update with your framework (e.g., "actix-web", "axum")
-testing_framework = "dotnet test"
-package_manager = "nuget"
+framework = "dotnet"  # Update with your framework (e.g., "actix-web", "axum")
+testing_framework = "xunit"
+package_manager = "dotnet"
 
 [beta_consent]
 acknowledged = true
-acknowledgement_date = "2026-08-25T17:02:09.153658600+00:00"
+acknowledgement_date = "2026-08-31T13:14:47.795983700+00:00"
 acknowledged_by = "nia"
 version_at_consent = "4.4.0"
 consent_phrase = "i agree"

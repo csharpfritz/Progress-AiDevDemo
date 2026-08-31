@@ -1,8 +1,0 @@
-version = "2.1.0"
-created_at = "2026-08-25T17:15:21.760329400+00:00"
-external_sources_enabled = false
-
-[hashes]
-project = "60d60d9ea9d9e7c40c11bbcf23668367691601f496e7e4e1ef9df3dad8c012a1"
-toolchain = "99c3bb2027a45ad9fcb938b9cfc03a71e36d121325fdf129da4e7cd42a63a82c"
-agents = "9fd597c40a60195cbfe4dcfdd2bf781f62bebd47528ec64400876981edff5835"
