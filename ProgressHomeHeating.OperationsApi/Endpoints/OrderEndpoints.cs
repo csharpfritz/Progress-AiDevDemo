@@ -67,6 +67,41 @@ public static class OrderEndpoints
             return Results.Ok(updated.ToDto());
         });
 
+        group.MapPost("/{id:guid}/complete", async (Guid id, CompleteDeliveryOrderRequest request, AppDbContext db) =>
+        {
+            var order = await db.Orders
+                .Include(o => o.Customer)
+                .Include(o => o.Driver)
+                .Include(o => o.Truck)
+                .FirstOrDefaultAsync(o => o.Id == id);
+            
+            if (order is null)
+                return Results.NotFound("Delivery order not found.");
+            
+            if (order.Status == DeliveryStatus.Delivered)
+                return Results.BadRequest("Order has already been delivered.");
+            
+            if (order.Status == DeliveryStatus.Cancelled)
+                return Results.BadRequest("Cannot complete a cancelled order.");
+            
+            var tank = await db.Tanks.Include(t => t.Customer).FirstOrDefaultAsync(t => t.Id == order.TankId);
+            if (tank is null)
+                return Results.BadRequest("Tank not found for this order.");
+            
+            // Update order
+            order.Status = DeliveryStatus.Delivered;
+            order.GallonsDelivered = request.GallonsDelivered;
+            
+            // Calculate new tank level
+            var gallonsAdded = request.GallonsDelivered;
+            var percentAdded = (double)gallonsAdded / tank.SizeGallons * 100;
+            tank.CurrentLevelPercent = Math.Min(100, tank.CurrentLevelPercent + percentAdded);
+            
+            await db.SaveChangesAsync();
+            
+            return Results.Ok(new CompleteDeliveryResponse(order.ToDto(), tank.ToDto()));
+        });
+
         // Demo reset: removes every order the AI agent has created (CreatedBy = "agent"),
         // leaving seeded/manually-created orders untouched, so the dispatch demo can be re-run.
         group.MapDelete("/agent-runs", async (AppDbContext db) =>

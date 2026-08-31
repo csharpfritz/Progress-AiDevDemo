@@ -32,3 +32,5 @@ public record UpdateDeliveryOrderRequest(
     int? GallonsDelivered);
 
 public record CompleteDeliveryOrderRequest(int GallonsDelivered);
+
+public record CompleteDeliveryResponse(DeliveryOrderDto Order, OilTankDto Tank);

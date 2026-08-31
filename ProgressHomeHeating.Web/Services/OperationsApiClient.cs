@@ -40,6 +40,14 @@ public class OperationsApiClient(HttpClient http)
         return await response.Content.ReadFromJsonAsync<DeliveryOrderDto>(ct);
     }
 
+    public async Task<CompleteDeliveryResponse?> CompleteDeliveryAsync(Guid orderId, int gallonsDelivered, CancellationToken ct = default)
+    {
+        var request = new CompleteDeliveryOrderRequest(gallonsDelivered);
+        var response = await http.PostAsJsonAsync($"/api/orders/{orderId}/complete", request, ct);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<CompleteDeliveryResponse>(ct);
+    }
+
     public async Task<List<DriverDto>> GetDriversAsync(CancellationToken ct = default) =>
         await http.GetFromJsonAsync<List<DriverDto>>("/api/drivers", ct) ?? [];
 
