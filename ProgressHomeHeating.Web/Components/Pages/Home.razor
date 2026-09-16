@@ -99,7 +99,7 @@ else
         customerCount = customers.Count;
         lowTanks = await Api.GetLowTanksAsync(30);
         var allOrders = await Api.GetOrdersAsync(from: DateOnly.FromDateTime(DateTime.Today));
-        upcomingOrders = allOrders.OrderBy(o => o.ScheduledDate).ToList();
+        upcomingOrders = FleetSummaryService.GetUpcomingDeliveries(allOrders);
         forecast = BuildFiveDayForecast();
         loading = false;
     }
