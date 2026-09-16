@@ -1,6 +1,7 @@
 @page "/customers"
 @rendermode InteractiveServer
 @inject OperationsApiClient Api
+@inject NavigationManager Nav
 
 <PageTitle>Customers</PageTitle>
 
@@ -13,7 +14,7 @@
 else
 {
     <div class="surface-card">
-        <TelerikGrid Data="@rows" Sortable="true" FilterMode="@GridFilterMode.FilterRow" Pageable="true" PageSize="15">
+        <TelerikGrid Data="@rows" Sortable="true" FilterMode="@GridFilterMode.FilterRow" Pageable="true" PageSize="15" OnRowClick="@OnRowClickHandler">
             <GridColumns>
                 <GridColumn Field="@nameof(CustomerRow.Name)" Title="Name" />
                 <GridColumn Field="@nameof(CustomerRow.Email)" Title="Email" />
@@ -21,14 +22,133 @@ else
                 <GridColumn Field="@nameof(CustomerRow.Address)" Title="Service Address" />
                 <GridColumn Field="@nameof(CustomerRow.TankLevel)" Title="Tank Level %" />
                 <GridColumn Field="@nameof(CustomerRow.TankSize)" Title="Tank Size (gal)" />
+                <GridColumn Title="" Width="130px" Filterable="false" Sortable="false" Context="row">
+                    <Template>
+                        @{
+                            var item = (CustomerRow)row;
+                        }
+                        <TelerikButton FillMode="flat"
+                                       ThemeColor="primary"
+                                       Size="sm"
+                                       OnClick="@(() => OpenDetails(item))">View Details</TelerikButton>
+                    </Template>
+                </GridColumn>
             </GridColumns>
         </TelerikGrid>
     </div>
+
+    <TelerikWindow @bind-Visible="@detailVisible"
+                   Modal="true"
+                   CloseOnOverlayClick="true"
+                   Draggable="true"
+                   Width="640px"
+                   MaxHeight="85vh">
+        <WindowTitle>
+            @(selectedRow?.Name ?? "Customer Details")
+        </WindowTitle>
+        <WindowActions>
+            <WindowAction Name="Close" />
+        </WindowActions>
+        <WindowContent>
+            @if (selectedRow is not null)
+            {
+                var customer = selectedRow.Customer;
+                var tank = selectedRow.Tank;
+
+                <h5>Customer Profile</h5>
+                <dl class="row mb-4">
+                    <dt class="col-sm-4">Name</dt>
+                    <dd class="col-sm-8">@customer.Name</dd>
+                    <dt class="col-sm-4">Email</dt>
+                    <dd class="col-sm-8">@customer.Email</dd>
+                    <dt class="col-sm-4">Phone</dt>
+                    <dd class="col-sm-8">@customer.Phone</dd>
+                    <dt class="col-sm-4">Service Address</dt>
+                    <dd class="col-sm-8">
+                        @customer.ServiceAddress.Street<br />
+                        @customer.ServiceAddress.City, @customer.ServiceAddress.State @customer.ServiceAddress.Zip
+                    </dd>
+                </dl>
+
+                <h5>Tank Status</h5>
+                @if (tank is null)
+                {
+                    <p class="text-muted mb-4">No oil tank is registered for this customer.</p>
+                }
+                else
+                {
+                    <dl class="row mb-2">
+                        <dt class="col-sm-4">Capacity</dt>
+                        <dd class="col-sm-8">@tank.SizeGallons gal</dd>
+                        <dt class="col-sm-4">Current Level</dt>
+                        <dd class="col-sm-8">
+                            @tank.CurrentLevelPercent.ToString("0.#")%
+                            (~@(Math.Round(tank.SizeGallons * tank.CurrentLevelPercent / 100)) gal)
+                        </dd>
+                        <dt class="col-sm-4">Est. Daily Usage</dt>
+                        <dd class="col-sm-8">@tank.EstimatedDailyUsageGallons.ToString("0.##") gal/day</dd>
+                        <dt class="col-sm-4">Installed</dt>
+                        <dd class="col-sm-8">@tank.InstallDate.ToString("MMM d, yyyy")</dd>
+                        <dt class="col-sm-4">Status</dt>
+                        <dd class="col-sm-8">
+                            <span class="badge bg-@TankStatusColor(tank.CurrentLevelPercent)">
+                                @TankStatusLabel(tank.CurrentLevelPercent)
+                            </span>
+                        </dd>
+                    </dl>
+                }
+
+                <h5>Recent Orders</h5>
+                @if (selectedOrders.Count == 0)
+                {
+                    <p class="text-muted mb-0">No delivery orders on record.</p>
+                }
+                else
+                {
+                    <table class="table table-sm mb-0">
+                        <thead>
+                            <tr>
+                                <th>Scheduled</th>
+                                <th>Status</th>
+                                <th class="text-end">Requested</th>
+                                <th class="text-end">Delivered</th>
+                                <th>Driver</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var order in selectedOrders)
+                            {
+                                <tr>
+                                    <td>@order.ScheduledDate.ToString("MMM d, yyyy")</td>
+                                    <td>@order.Status</td>
+                                    <td class="text-end">@order.GallonsRequested gal</td>
+                                    <td class="text-end">@(order.GallonsDelivered is null ? "—" : $"{order.GallonsDelivered} gal")</td>
+                                    <td>@(order.DriverName ?? "Unassigned")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            }
+        </WindowContent>
+        <WindowFooter>
+            <div class="d-flex justify-content-end gap-2">
+                <TelerikButton ThemeColor="primary"
+                               OnClick="@(() => Nav.NavigateTo("/dispatch"))">Schedule Delivery</TelerikButton>
+                <TelerikButton FillMode="outline" OnClick="@CloseDetails">Close</TelerikButton>
+            </div>
+        </WindowFooter>
+    </TelerikWindow>
 }
 
 @code {
     private bool loading = true;
     private List<CustomerRow> rows = [];
+    private Dictionary<Guid, List<DeliveryOrderDto>> ordersByCustomer = [];
+
+    private bool detailVisible;
+    private CustomerRow? selectedRow;
+    private List<DeliveryOrderDto> selectedOrders = [];
 
     protected override async Task OnInitializedAsync()
     {
@@ -36,20 +156,82 @@ else
         var tanks = await Api.GetTanksAsync();
         var tanksByCustomer = tanks.ToLookup(t => t.CustomerId);
 
+        try
+        {
+            var orders = await Api.GetOrdersAsync();
+            ordersByCustomer = orders
+                .GroupBy(o => o.CustomerId)
+                .ToDictionary(g => g.Key, g => g.OrderByDescending(o => o.ScheduledDate).ToList());
+        }
+        catch
+        {
+            ordersByCustomer = [];
+        }
+
         rows = customers.Select(c =>
         {
             var tank = tanksByCustomer[c.Id].FirstOrDefault();
             return new CustomerRow(
+                c.Id,
                 c.Name,
                 c.Email,
                 c.Phone,
                 $"{c.ServiceAddress.Street}, {c.ServiceAddress.City}, {c.ServiceAddress.State} {c.ServiceAddress.Zip}",
                 tank?.CurrentLevelPercent,
-                tank?.SizeGallons);
+                tank?.SizeGallons,
+                c,
+                tank);
         }).ToList();
 
         loading = false;
     }
 
-    private record CustomerRow(string Name, string Email, string Phone, string Address, double? TankLevel, int? TankSize);
+    private void OpenDetails(CustomerRow row)
+    {
+        selectedRow = row;
+        selectedOrders = ordersByCustomer.TryGetValue(row.CustomerId, out var list)
+            ? list.Take(5).ToList()
+            : [];
+        detailVisible = true;
+    }
+
+    private void OnRowClickHandler(GridRowClickEventArgs args)
+    {
+        if (args.Item is CustomerRow row)
+        {
+            OpenDetails(row);
+        }
+    }
+
+    private void CloseDetails()
+    {
+        detailVisible = false;
+    }
+
+    private static string TankStatusLabel(double level) => level switch
+    {
+        <= 20 => "Critical",
+        <= 30 => "Low",
+        <= 60 => "Adequate",
+        _ => "Full"
+    };
+
+    private static string TankStatusColor(double level) => level switch
+    {
+        <= 20 => "danger",
+        <= 30 => "warning",
+        <= 60 => "info",
+        _ => "success"
+    };
+
+    private record CustomerRow(
+        Guid CustomerId,
+        string Name,
+        string Email,
+        string Phone,
+        string Address,
+        double? TankLevel,
+        int? TankSize,
+        CustomerDto Customer,
+        OilTankDto? Tank);
 }
