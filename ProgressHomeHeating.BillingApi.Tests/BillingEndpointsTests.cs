@@ -11,6 +11,9 @@ public class BillingEndpointsTests : IClassFixture<BillingApiFactory>
 
     public BillingEndpointsTests(BillingApiFactory factory) => _factory = factory;
 
+    // Subtracts a safety margin (well above BillingConstants.MinimumPaymentCents) so the payment
+    // stays comfortably within [minimum, balance) even as the seeder's invoice amounts vary; keep
+    // this margin in mind if DeterministicBillingSeeder's amount/invoice-count ranges ever change.
     private static long PayableCents(long balance) =>
         Math.Max(BillingConstants.MinimumPaymentCents, balance - (balance % 100) - 500);
 
@@ -190,6 +193,43 @@ public class BillingEndpointsTests : IClassFixture<BillingApiFactory>
 
         var after = await client.GetFromJsonAsync<BillingAccountDto>($"/v1/billing_accounts/{customerId}");
         Assert.Equal(before.BalanceCents - amount, after!.BalanceCents);
+    }
+
+    [Fact]
+    public async Task Reusing_an_idempotency_key_with_different_parameters_is_rejected()
+    {
+        var client = _factory.CreateClient();
+        var customerId = TestCustomers.WithHistory(skip: 8);
+        var key = Guid.NewGuid().ToString();
+
+        var before = await client.GetFromJsonAsync<BillingAccountDto>($"/v1/billing_accounts/{customerId}");
+        var amount = PayableCents(before!.BalanceCents);
+
+        async Task<HttpResponseMessage> PostAsync(long amountCents)
+        {
+            using var message = new HttpRequestMessage(HttpMethod.Post, "/v1/payment_intents")
+            {
+                Content = JsonContent.Create(new CreatePaymentIntentRequest(customerId, amountCents, "usd", "card"))
+            };
+            message.Headers.Add(BillingConstants.IdempotencyKeyHeader, key);
+            return await client.SendAsync(message);
+        }
+
+        var first = await PostAsync(amount);
+        first.EnsureSuccessStatusCode();
+        var firstIntent = await first.Content.ReadFromJsonAsync<PaymentIntentDto>();
+
+        var second = await PostAsync(amount - 100);
+
+        Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+        var error = await second.Content.ReadFromJsonAsync<BillingErrorDto>();
+        Assert.Equal(BillingErrorCodes.IdempotencyKeyMismatch, error!.Code);
+
+        var after = await client.GetFromJsonAsync<BillingAccountDto>($"/v1/billing_accounts/{customerId}");
+        Assert.Equal(before.BalanceCents - amount, after!.BalanceCents);
+
+        var fetched = await client.GetFromJsonAsync<PaymentIntentDto>($"/v1/payment_intents/{firstIntent!.Id}");
+        Assert.Equal(firstIntent.Id, fetched!.Id);
     }
 
     [Fact]
