@@ -28,10 +28,15 @@ var agentApi = builder.AddDotnetProject("agentapi", "../ProgressHomeHeating.Agen
     .WithEnvironment("AzureOpenAI__ApiKey", azureOpenAiApiKey)
     .WithEnvironment("AzureOpenAI__DeploymentName", azureOpenAiDeploymentName);
 
+var billingApi = builder.AddDotnetProject("billingapi", "../ProgressHomeHeating.BillingApi/ProgressHomeHeating.BillingApi.csproj");
+
+// Billing is referenced but deliberately not awaited: a billing outage must not block web startup
+// or the Dashboard/Customers/Scheduler pages. The Billing page degrades on its own (AC-004).
 builder.AddDotnetProject("web", "../ProgressHomeHeating.Web/ProgressHomeHeating.Web.csproj")
     .WithReference(operationsApi)
     .WaitFor(operationsApi)
     .WithReference(agentApi)
-    .WaitFor(agentApi);
+    .WaitFor(agentApi)
+    .WithReference(billingApi);
 
 builder.Build().Run();
