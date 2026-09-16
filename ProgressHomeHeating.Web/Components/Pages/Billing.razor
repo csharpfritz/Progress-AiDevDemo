@@ -1,0 +1,86 @@
+@page "/billing"
+@page "/billing/{CustomerId:guid}"
+@rendermode InteractiveServer
+@using ProgressHomeHeating.Web.Components.Billing
+@inject OperationsApiClient Operations
+@inject NavigationManager Navigation
+
+<PageTitle>Billing</PageTitle>
+
+<h1>Billing</h1>
+
+@if (loadingCustomers)
+{
+    <p data-testid="billing-customers-loading"><em>Loading account...</em></p>
+}
+else if (customersUnavailable)
+{
+    <div class="alert alert-danger" data-testid="billing-customers-unavailable">
+        The customer directory is unavailable, so billing cannot be shown right now.
+    </div>
+}
+else
+{
+    <div class="surface-card mb-4">
+        <label class="form-label" for="billing-customer">Viewing billing for</label>
+        <select id="billing-customer" class="form-select" style="max-width: 24rem;"
+                data-testid="billing-customer-select"
+                value="@selectedCustomerId" @onchange="OnCustomerChanged">
+            @foreach (var customer in customers)
+            {
+                <option value="@customer.Id">@customer.Name</option>
+            }
+        </select>
+    </div>
+
+    @if (selectedCustomerId is { } id)
+    {
+        <BillingPanel CustomerId="@id" />
+    }
+}
+
+@code {
+    [Parameter] public Guid? CustomerId { get; set; }
+
+    private bool loadingCustomers = true;
+    private bool customersUnavailable;
+    private List<CustomerDto> customers = [];
+    private Guid? selectedCustomerId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            customers = [.. (await Operations.GetCustomersAsync()).OrderBy(c => c.Name)];
+        }
+        catch (Exception)
+        {
+            customersUnavailable = true;
+        }
+        finally
+        {
+            loadingCustomers = false;
+        }
+
+        selectedCustomerId = CustomerId is { } routeId && customers.Any(c => c.Id == routeId)
+            ? routeId
+            : customers.FirstOrDefault()?.Id;
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (CustomerId is { } routeId && customers.Any(c => c.Id == routeId))
+        {
+            selectedCustomerId = routeId;
+        }
+    }
+
+    private void OnCustomerChanged(ChangeEventArgs args)
+    {
+        if (Guid.TryParse(args.Value?.ToString(), out var id))
+        {
+            selectedCustomerId = id;
+            Navigation.NavigateTo($"/billing/{id}");
+        }
+    }
+}
