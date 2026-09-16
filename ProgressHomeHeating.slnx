@@ -4,4 +4,5 @@
   <Project Path="ProgressHomeHeating.Contracts/ProgressHomeHeating.Contracts.csproj" />
   <Project Path="ProgressHomeHeating.OperationsApi/ProgressHomeHeating.OperationsApi.csproj" />
   <Project Path="ProgressHomeHeating.AgentApi/ProgressHomeHeating.AgentApi.csproj" />
+  <Project Path="ProgressHomeHeating.Tests/ProgressHomeHeating.Tests.csproj" />
 </Solution>
