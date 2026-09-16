@@ -13,7 +13,8 @@ public class OrderDetailEditModelTests
         DeliveryStatus status = DeliveryStatus.Scheduled,
         Guid? driverId = null,
         Guid? truckId = null,
-        int? gallonsDelivered = null) => new(
+        int? gallonsDelivered = null,
+        string? createdBy = null) => new(
             Id: Guid.Parse("44444444-4444-4444-4444-444444444444"),
             CustomerId: Guid.NewGuid(),
             CustomerName: "Test Customer",
@@ -25,7 +26,8 @@ public class OrderDetailEditModelTests
             ScheduledDate: new DateOnly(2026, 1, 15),
             Status: status,
             GallonsRequested: 150,
-            GallonsDelivered: gallonsDelivered);
+            GallonsDelivered: gallonsDelivered,
+            CreatedBy: createdBy);
 
     [Fact]
     public void Constructor_seeds_editable_fields_from_order()
@@ -108,6 +110,31 @@ public class OrderDetailEditModelTests
 
         Assert.Equal(DeliveryStatus.Delivered, request.Status);
         Assert.Equal(175, request.GallonsDelivered);
+        Assert.Null(request.ScheduledDate);
+        Assert.Null(request.DriverId);
+        Assert.Null(request.TruckId);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("dispatch-agent")]
+    public void Constructor_and_delta_building_are_agnostic_to_CreatedBy(string? createdBy)
+    {
+        // VAL-6.6: the AI dispatch agent creates orders with CreatedBy set, but the
+        // detail modal's edit model keys purely on order data (Id-based lookup in
+        // Scheduler.razor), so agent-created orders must behave identically to
+        // manually scheduled ones.
+        var model = new OrderDetailEditModel(Order(DeliveryStatus.EnRoute, DriverA, TruckA, 120, createdBy))
+        {
+            Status = DeliveryStatus.Delivered,
+            GallonsDelivered = 200
+        };
+
+        var request = model.BuildUpdateRequest();
+
+        Assert.True(model.HasChanges);
+        Assert.Equal(DeliveryStatus.Delivered, request.Status);
+        Assert.Equal(200, request.GallonsDelivered);
         Assert.Null(request.ScheduledDate);
         Assert.Null(request.DriverId);
         Assert.Null(request.TruckId);
