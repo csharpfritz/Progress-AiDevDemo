@@ -42,3 +42,35 @@ the review identified zero findings in any category, **no code changes were requ
 - No new tests added (no behavior changed).
 - Re-ran `dotnet build ProgressHomeHeating.Web/ProgressHomeHeating.Web.csproj` to reconfirm a clean
   baseline — 0 errors (same pre-existing Telerik license / `App.razor` warnings as before).
+
+## Runtime Fix — `aria-label` InvalidOperationException
+
+**Symptom:** At runtime, loading the Dashboard threw:
+```
+InvalidOperationException: Object of type 'Telerik.Blazor.Components.ButtonGroupToggleButton'
+does not have a property matching the name 'aria-label'.
+```
+
+**Root cause:** `ButtonGroupToggleButton` does not implement `CaptureUnmatchedValues`, so it
+cannot accept arbitrary HTML attribute splatting (e.g., a raw `aria-label="..."` attribute).
+Telerik exposes the equivalent accessibility hook as a dedicated, strongly-typed component
+parameter named `AriaLabel` (PascalCase) instead.
+
+**Fix:** In `ProgressHomeHeating.Web/Components/Pages/Home.razor`, replaced
+`aria-label="Show temperatures in Fahrenheit/Celsius"` with
+`AriaLabel="Show temperatures in Fahrenheit/Celsius"` on both `ButtonGroupToggleButton` elements.
+`Title` was left unchanged (already a valid, working parameter).
+
+- [x] Rebuilt `ProgressHomeHeating.Web/ProgressHomeHeating.Web.csproj` — 0 errors.
+- [x] Started the app via `dotnet run apphost.cs` (Aspire AppHost) and fetched the Dashboard HTML
+  directly from the Web project's Kestrel endpoint (`curl -k --http1.1`). Confirmed:
+  - No `InvalidOperationException` / unhandled-exception page.
+  - Rendered markup includes `aria-label="Show temperatures in Fahrenheit"` and
+    `aria-label="Show temperatures in Celsius"` on the toggle buttons — the same attribute
+    output as before, now via the supported API.
+  - The static `#blazor-error-ui` div present in the page is the standard hidden Blazor Server
+    template boilerplate (not an active error).
+- [x] Cleaned up all background AppHost/Web/API processes started for verification.
+
+AC-008 (keyboard focus) and AC-009 (visual consistency) are unaffected by this change — only the
+accessible-name wiring API changed, not markup structure or styling.
