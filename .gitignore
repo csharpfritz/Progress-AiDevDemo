@@ -481,3 +481,7 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Nia/Forge context ignores
+.nia/**/.sessions.lock
+.nia/**/sessions.toml
