@@ -19,6 +19,12 @@ else if (customersUnavailable)
         The customer directory is unavailable, so billing cannot be shown right now.
     </div>
 }
+else if (customers.Count == 0)
+{
+    <p class="text-muted" data-testid="billing-no-customers">
+        No customers are available yet. Billing information will appear here once a customer is added.
+    </p>
+}
 else
 {
     <div class="surface-card mb-4">
