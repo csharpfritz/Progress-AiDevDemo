@@ -1,0 +1,665 @@
+# ============================================================================
+# Issue-to-PR (Visual Verification) Workflow
+# ============================================================================
+#
+# Same lifecycle as issue-to-pr, plus Playwright-driven visual evidence:
+# - Captures a "before" snapshot/screenshot before any code changes are made
+# - Captures an "after" snapshot/screenshot once implementation + review
+#   auto-fixes are complete
+# - Gates PR creation on a Playwright functional verification pass (not just
+#   a screenshot diff) — failures loop back into fixes and are re-verified
+# - Publishes the PR with both snapshots and a Playwright test/analysis
+#   summary embedded in the description
+#
+# Usage:
+#   nia workflow run issue-to-pr-visual
+#
+# Prerequisites:
+# - Issue context set via `nia config set-issue <number>`
+# - Agent authenticated
+# - `playwright-cli` available; app is a .NET Aspire solution started via
+#   `aspire run` from ProgressHomeHeating.AppHost/ (see `aspire-orchestration`
+#   / `aspire-monitoring` skills for start + URL discovery)
+#
+# ============================================================================
+
+workflow_schema_version = "1.0.0"
+
+[workflow]
+name = "issue-to-pr-visual"
+description = "Full planning and review before code is written, with Playwright visual evidence: a before-change snapshot, an after-change snapshot, a Playwright-gated functional verification pass, then a PR whose description embeds both snapshots plus the test summary."
+version = "1.0.0"
+required_context = ["issue_id"]
+
+# Loop detection: allow for the code-generation loop (issue-to-pr) plus the
+# visual-verification retry loop introduced here.
+[workflow.loop_detection]
+max_transitions = 200
+on_loop_detected = "approval_gate"
+
+[workflow.initial_state]
+name = "draft_issue"
+
+# ============================================================================
+# ISSUE DRAFTING PHASE
+# ============================================================================
+
+[[workflow.states]]
+name = "draft_issue"
+description = "Drafting issue description"
+command = { target = "issue", operation = "draft" }
+on_success = "await_draft_approval"
+on_failure = "draft_failed"
+
+[[workflow.states]]
+name = "await_draft_approval"
+description = "Please review & edit issue before continuing with planning"
+on_success = "plan_implementation"
+on_failure = "draft_rejected"
+
+[workflow.states.approval]
+gate_id = "draft_approval"
+message = "Issue draft is ready. Please review & edit issue before approving for planning"
+timeout_seconds = 86400
+
+# ============================================================================
+# PLANNING PHASE
+# ============================================================================
+
+[[workflow.states]]
+name = "plan_implementation"
+description = "Creating implementation plan"
+command = { target = "issue", operation = "plan" }
+on_success = "await_plan_approval"
+on_failure = "plan_failed"
+
+[[workflow.states]]
+name = "await_plan_approval"
+description = "Please review & edit plan before approving to start code generation"
+on_success = "capture_before_snapshot"
+on_failure = "plan_rejected"
+
+[workflow.states.approval]
+gate_id = "plan_approval"
+message = "Implementation plan is ready. Review & edit before approving for code generation"
+timeout_seconds = 86400
+
+# ============================================================================
+# BEFORE-CHANGE VISUAL BASELINE (Playwright)
+# ============================================================================
+# Captures a snapshot + screenshot of the app BEFORE any code changes are
+# made, per the `playwright-cli` and `pr-screenshot-workflow` skills.
+
+[[workflow.states]]
+name = "capture_before_snapshot"
+description = "Capturing 'before' Playwright snapshot"
+operation = { id = "capture-before", type = "agent", prompt = """
+    Capture a "before" visual baseline using Playwright, before any code changes are
+    made for this issue. Follow the `playwright-cli` and `pr-screenshot-workflow` skills.
+
+    Steps:
+    1. Ensure the app is running: from `ProgressHomeHeating.AppHost/`, run `aspire run`
+       if it is not already running (see `aspire-orchestration` skill).
+    2. Find the `web` resource's live URL via `aspire ps` / the Aspire dashboard (see
+       `aspire-monitoring` skill). Do not guess a fixed port.
+    3. Create the evidence directory: `mkdir -p /tmp/nia-visual-evidence/issue-{{issue_id}}`
+    4. Using `playwright-cli`:
+       - `playwright-cli open <web-url>`
+       - Navigate to the page(s)/feature(s) relevant to this issue.
+       - `playwright-cli snapshot --filename=/tmp/nia-visual-evidence/issue-{{issue_id}}/before.yml`
+       - `playwright-cli screenshot --filename=/tmp/nia-visual-evidence/issue-{{issue_id}}/before.png`
+       - `playwright-cli close`
+    5. If the feature spans multiple pages/states, capture one screenshot per page as
+       `before-<page>.png` and list every file captured.
+
+    Error handling:
+    - If the app cannot be started or the relevant page cannot be reached, report the
+      exact error and STOP — do not fabricate a screenshot.
+    """, context = ["issue"] }
+on_success = "verify_before_snapshot"
+on_failure = "retry_before_snapshot"
+
+[[workflow.states]]
+name = "verify_before_snapshot"
+description = "Verifying 'before' snapshot was saved"
+operation = { id = "before-snapshot-exists", type = "file_exists", path = "/tmp/nia-visual-evidence/issue-{{issue_id}}/before.png", on_false = "fail" }
+on_success = "create_code"
+on_failure = "retry_before_snapshot"
+
+[[workflow.states]]
+name = "retry_before_snapshot"
+description = "Retrying 'before' snapshot capture"
+operation = { id = "retry-capture-before", type = "agent", prompt = """
+    The "before" Playwright snapshot was not saved successfully. Retry capturing it:
+    ensure the app is running (`aspire run` / `aspire ps`), then repeat the
+    `playwright-cli` steps to save
+    /tmp/nia-visual-evidence/issue-{{issue_id}}/before.png and before.yml.
+    Report the exact error if it fails again.
+    """, context = ["issue"], share_session_with = "capture_before_snapshot" }
+on_success = "verify_before_snapshot_retry"
+on_failure = "await_before_snapshot_intervention"
+
+[[workflow.states]]
+name = "verify_before_snapshot_retry"
+description = "Verifying 'before' snapshot after retry"
+operation = { id = "before-snapshot-exists-retry", type = "file_exists", path = "/tmp/nia-visual-evidence/issue-{{issue_id}}/before.png", on_false = "fail" }
+on_success = "create_code"
+on_failure = "await_before_snapshot_intervention"
+
+[[workflow.states]]
+name = "await_before_snapshot_intervention"
+description = "Could not automatically capture the 'before' snapshot - manual intervention required"
+on_success = "create_code"
+on_failure = "before_snapshot_failed"
+
+[workflow.states.approval]
+gate_id = "before_snapshot_intervention"
+message = "Could not automatically capture the 'before' Playwright snapshot. Capture one manually (see the playwright-cli skill) and save it to /tmp/nia-visual-evidence/issue-{{issue_id}}/before.png, then approve to continue. Reject to abort."
+timeout_seconds = 86400
+
+# ============================================================================
+# CODE GENERATION LOOP (Automated with Check Types)
+# ============================================================================
+# Identical to issue-to-pr: loop until all tasks in tasks.md are marked done.
+
+[[workflow.states]]
+name = "create_code"
+description = "Generating code from plan"
+max_visits = 30
+loop_enabled = true
+loop_counter = "code_iterations"
+command = { target = "code", operation = "create" }
+on_success = "check_tasks"
+on_failure = "retry_code_create"
+
+[[workflow.states.escape_conditions]]
+counter_value = 15
+action = "approval"
+approval_gate = "await_iteration_approval"
+approval_message = "Code generation has required 15 iterations. Review progress before continuing"
+
+[[workflow.states]]
+name = "await_iteration_approval"
+description = "Code generation has required 15 iterations. Review progress before continuing"
+on_success = "create_code"
+on_failure = "review_rejected"
+
+[workflow.states.approval]
+gate_id = "code_approval"
+message = "Code generation has required 15 iterations. Review progress before continuing"
+timeout_seconds = 86400
+
+[[workflow.states]]
+name = "retry_code_create"
+description = "Retrying to update tasks.md"
+command = { target = "code", operation = "create", modifiers = ["retry"] }
+max_visits = 30
+on_success = "check_tasks"
+on_failure = "create_code"
+
+[[workflow.states]]
+name = "check_tasks"
+description = "Checking if tasks are completed"
+operation = { id = "tasks_done", type = "tasks_complete", on_false = "fail" }
+max_visits = 30
+on_success = "code_review"
+on_failure = "context_counter"
+
+[[workflow.states]]
+name = "context_counter"
+description = "Continue with same session? (clear context every 3rd iteration)"
+operation = { id = "context_check", type = "counter_matches", counter_name = "code_iterations", counter_expression = "{{COUNTER}} % 3 != 0", on_false = "fail" }
+max_visits = 30
+on_success = "create_code"
+on_failure = "create_code_clear"
+
+[[workflow.states]]
+name = "create_code_clear"
+description = "Generating code with fresh context"
+command = { target = "code", operation = "create", modifiers = ["clear"] }
+max_visits = 10
+on_success = "check_tasks_clear"
+on_failure = "retry_code_create"
+
+[[workflow.states]]
+name = "check_tasks_clear"
+description = "Checking if tasks are completed after context clear"
+operation = { id = "tasks_done_clear", type = "tasks_complete", on_false = "fail" }
+max_visits = 30
+on_success = "code_review"
+on_failure = "create_code"
+
+# ============================================================================
+# CODE REVIEW PHASE
+# ============================================================================
+
+[[workflow.states]]
+name = "code_review"
+description = "Reviewing generated code"
+command = { target = "code", operation = "review" }
+on_success = "await_review_approval"
+on_failure = "retry_code_review"
+
+[[workflow.states]]
+name = "retry_code_review"
+description = "Retrying to generate review.md"
+command = { target = "code", operation = "review", modifiers = ["retry"] }
+on_success = "await_review_approval"
+on_failure = "await_review_approval"
+
+[[workflow.states]]
+name = "await_review_approval"
+description = "Review is ready, read & edit to prepare for auto-fix"
+on_success = "auto_fix_issues"
+on_failure = "review_rejected"
+
+[workflow.states.approval]
+gate_id = "review_approval"
+message = "Code review complete. Make any manual edits now, then approve to run auto-fix."
+timeout_seconds = 86400
+
+[[workflow.states]]
+name = "auto_fix_issues"
+description = "Fixing issues identified in code review"
+command = { target = "code", operation = "review", modifiers = ["auto-fix", "issues"] }
+on_success = "capture_after_snapshot"
+on_failure = "fix_failed"
+
+# ============================================================================
+# AFTER-CHANGE VISUAL SNAPSHOT + PLAYWRIGHT VERIFICATION GATE
+# ============================================================================
+# Captures the "after" evidence once implementation is complete, then gates
+# PR creation on an actual Playwright functional verification pass (driving
+# the browser, not just comparing screenshots). Failures loop back into a
+# fix step and re-verify, with an escape hatch to a human approval gate.
+
+[[workflow.states]]
+name = "capture_after_snapshot"
+description = "Capturing 'after' Playwright snapshot"
+max_visits = 10
+loop_enabled = true
+loop_counter = "visual_verification_iterations"
+operation = { id = "capture-after", type = "agent", prompt = """
+    Capture an "after" visual snapshot using Playwright now that the implementation
+    (and any review auto-fixes) is complete. Follow the `playwright-cli` and
+    `pr-screenshot-workflow` skills.
+
+    Steps:
+    1. Ensure the app is running with the latest code (restart via `aspire run` /
+       `aspire restart` if needed — see `aspire-orchestration` skill).
+    2. Find the current `web` resource URL via `aspire ps` (see `aspire-monitoring` skill).
+    3. Using `playwright-cli`, navigate to the same page(s)/feature(s) captured in the
+       "before" snapshot at /tmp/nia-visual-evidence/issue-{{issue_id}}/before.yml.
+    4. Save:
+       - `playwright-cli snapshot --filename=/tmp/nia-visual-evidence/issue-{{issue_id}}/after.yml`
+       - `playwright-cli screenshot --filename=/tmp/nia-visual-evidence/issue-{{issue_id}}/after.png`
+       - `playwright-cli close`
+    5. Use the same page(s)/naming convention as the "before" capture so the two can be
+       compared side by side.
+
+    Error handling:
+    - If the app fails to start or the page errors out, report the exact error and STOP.
+    """, context = ["issue"] }
+on_success = "verify_after_snapshot"
+on_failure = "retry_after_snapshot"
+
+[[workflow.states.escape_conditions]]
+counter_value = 5
+action = "approval"
+approval_gate = "visual_verification_approval"
+approval_message = "Visual verification has required 5 iterations. Review progress before continuing"
+
+[[workflow.states]]
+name = "verify_after_snapshot"
+description = "Verifying 'after' snapshot was saved"
+operation = { id = "after-snapshot-exists", type = "file_exists", path = "/tmp/nia-visual-evidence/issue-{{issue_id}}/after.png", on_false = "fail" }
+on_success = "playwright_verify"
+on_failure = "retry_after_snapshot"
+
+[[workflow.states]]
+name = "retry_after_snapshot"
+description = "Retrying 'after' snapshot capture"
+operation = { id = "retry-capture-after", type = "agent", prompt = """
+    The "after" Playwright snapshot was not saved successfully. Retry capturing it:
+    ensure the app is running (`aspire run` / `aspire ps`), then repeat the
+    `playwright-cli` steps to save
+    /tmp/nia-visual-evidence/issue-{{issue_id}}/after.png and after.yml.
+    Report the exact error if it fails again.
+    """, context = ["issue"], share_session_with = "capture_after_snapshot" }
+on_success = "verify_after_snapshot_retry"
+on_failure = "await_visual_verification_intervention"
+
+[[workflow.states]]
+name = "verify_after_snapshot_retry"
+description = "Verifying 'after' snapshot after retry"
+operation = { id = "after-snapshot-exists-retry", type = "file_exists", path = "/tmp/nia-visual-evidence/issue-{{issue_id}}/after.png", on_false = "fail" }
+on_success = "playwright_verify"
+on_failure = "await_visual_verification_intervention"
+
+[[workflow.states]]
+name = "await_visual_verification_intervention"
+description = "Could not automatically capture the 'after' snapshot - manual intervention required"
+on_success = "playwright_verify"
+on_failure = "visual_verification_failed"
+
+[workflow.states.approval]
+gate_id = "after_snapshot_intervention"
+message = "Could not automatically capture the 'after' Playwright snapshot. Capture one manually and save it to /tmp/nia-visual-evidence/issue-{{issue_id}}/after.png, then approve to continue verification. Reject to abort."
+timeout_seconds = 86400
+
+# State: Gate — actually drive the browser with Playwright and verify correctness
+[[workflow.states]]
+name = "playwright_verify"
+description = "Gating change on a Playwright functional verification pass"
+operation = { id = "playwright-verify", type = "agent", prompt = """
+    Gate this change on a Playwright functional verification pass, per the
+    `playwright-cli` skill. A screenshot alone is not sufficient — you must actually
+    drive the browser and confirm behavior.
+
+    Steps:
+    1. Using `playwright-cli`, exercise every user flow touched by this issue: click
+       through the changed page(s), submit forms, trigger the changed behavior, etc.
+    2. Compare against the "before" snapshot at
+       /tmp/nia-visual-evidence/issue-{{issue_id}}/before.yml and the issue's acceptance
+       criteria — confirm the change behaves as intended and nothing else regressed.
+       Check `playwright-cli console` for new errors/warnings.
+    3. Write a verification summary to
+       /tmp/nia-visual-evidence/issue-{{issue_id}}/verification-summary.md containing:
+       - A bullet list of each flow/page tested and the outcome (pass/fail)
+       - Any console errors observed
+       - A one-paragraph overall verdict
+    4. Decision:
+       - If every tested flow passes and no regressions are found: report VERIFIED and
+         finish this step successfully.
+       - If any flow fails, a regression is found, or a console error appears: report
+         the specific failure(s) in detail and STOP (fail this step).
+    """, context = ["issue"], share_session_with = "capture_after_snapshot" }
+on_success = "create_pr"
+on_failure = "fix_verification_issues"
+
+[[workflow.states]]
+name = "fix_verification_issues"
+description = "Fixing issues found by Playwright verification"
+operation = { id = "fix-verification-issues", type = "agent", prompt = """
+    Playwright verification found issues with the current implementation. Read
+    /tmp/nia-visual-evidence/issue-{{issue_id}}/verification-summary.md and fix every
+    issue it reports.
+    """, context = ["issue"], share_session_with = "playwright_verify" }
+on_success = "capture_after_snapshot"
+on_failure = "await_visual_verification_approval"
+
+[[workflow.states]]
+name = "await_visual_verification_approval"
+description = "Playwright verification requires human review before continuing"
+on_success = "capture_after_snapshot"
+on_failure = "visual_verification_failed"
+
+[workflow.states.approval]
+gate_id = "visual_verification_approval"
+message = "Playwright verification has required multiple iterations, or the last auto-fix attempt failed. Review /tmp/nia-visual-evidence/issue-{{issue_id}}/verification-summary.md, make manual edits if needed, then approve to retry verification. Reject to stop."
+timeout_seconds = 86400
+
+# ============================================================================
+# PR CREATION PHASE
+# ============================================================================
+
+[[workflow.states]]
+name = "create_pr"
+description = "Create PR with standard format and set context"
+operation = { id = "create-pr", type = "agent", prompt = """
+    Create a Pull Request from the current branch to the main branch.
+
+    Steps:
+    1. Get the current branch name using `git branch --show-current`
+    2. CRITICAL - Push local commits before creating PR:
+       a. Check branch status: `git status -sb`
+       b. If status shows "[ahead N, behind M]" (diverged):
+          STOP and report "Cannot push - branch has diverged from remote. Run 'git pull --rebase' to sync with remote first."
+       c. If status shows only "[ahead N]": proceed to push
+       d. Push changes: `git push -u origin <branch_name>`
+       e. Verify push succeeded by checking output
+       f. If push fails, STOP and report the error - do NOT force push
+    3. Create a PR with:
+       - Title: "Fixes #{issue_id} - {branch_name}"
+       - Body: "Fixes #{issue_id} - {branch_name}"
+    4. Extract the PR number from the created PR
+    5. CRITICAL: Run `nia config set-pr <PR_NUMBER>` to save the PR ID for subsequent workflow steps
+    6. Confirm the PR was created successfully
+
+    Error Handling:
+    - If push output contains "non-fast-forward" or "rejected":
+      Report "Push failed - remote branch has new commits you don't have locally. Run 'git pull --rebase origin <branch>' to sync, then try pushing again."
+    - If push output contains "permission" or "denied":
+      Report "Push failed - access denied. Verify repository permissions and authentication."
+    - For any other push failure:
+      Report "Push failed with error: [include full git error message]"
+    - CRITICAL: Never use --force, -f, --force-with-lease, or any forced push flags
+    """, context = ["issue"] }
+on_success = "verify_pr_context"
+on_failure = "await_pr_intervention"
+
+[[workflow.states]]
+name = "verify_pr_context"
+description = "Verifying PR context was saved"
+operation = { id = "check-pr-context", type = "file_matches", path = ".nia/context.toml", pattern = "(?m)^\\s*pr_id\\s*=\\s*(?:\\\"[1-9][0-9]*\\\"|[1-9][0-9]*)\\s*(?:#.*)?$", on_false = "fail" }
+on_success = "pr_draft"
+on_failure = "retry_set_pr_context"
+
+[[workflow.states]]
+name = "retry_set_pr_context"
+description = "Retrying to set PR context"
+operation = { id = "retry-set-pr", type = "agent", prompt = """
+    The PR was created but the context was not set properly. Please fix this:
+
+    Steps:
+    1. Find the PR number from the recently created PR (check git branch, gh pr list, or GitHub)
+    2. Run `nia config set-pr <PR_NUMBER>` to save the PR ID
+    3. Verify the command succeeded
+
+    This is critical - all future workflow steps depend on having the PR context set.
+    """, context = ["issue"], share_session_with = "create_pr" }
+on_success = "verify_pr_context_retry"
+on_failure = "await_pr_intervention"
+
+[[workflow.states]]
+name = "verify_pr_context_retry"
+description = "Verifying PR context after retry"
+operation = { id = "check-pr-context-retry", type = "file_matches", path = ".nia/context.toml", pattern = "(?m)^\\s*pr_id\\s*=\\s*(?:\\\"[1-9][0-9]*\\\"|[1-9][0-9]*)\\s*(?:#.*)?$", on_false = "fail" }
+on_success = "pr_draft"
+on_failure = "await_pr_intervention"
+
+[[workflow.states]]
+name = "await_pr_intervention"
+description = "PR creation failed - manual intervention required"
+on_success = "pr_draft"
+on_failure = "pr_failed"
+
+[workflow.states.approval]
+gate_id = "pr_intervention"
+message = "PR creation failed. Create PR manually, run 'nia config set-pr <PR_ID>', then approve."
+timeout_seconds = 86400
+
+[[workflow.states]]
+name = "pr_draft"
+description = "Generate PR description draft"
+command = { target = "pr", operation = "draft" }
+on_success = "pr_publish"
+on_failure = "pr_publish"
+
+[[workflow.states]]
+name = "pr_publish"
+description = "Publish PR description to GitHub"
+command = { target = "pr", operation = "publish" }
+on_success = "attach_visual_evidence"
+on_failure = "attach_visual_evidence"
+
+# State: Attach the before/after snapshots and Playwright test summary to the PR
+[[workflow.states]]
+name = "attach_visual_evidence"
+description = "Attaching before/after snapshots and Playwright test summary to the PR"
+operation = { id = "attach-visual-evidence", type = "agent", prompt = """
+    Attach the Playwright visual evidence and verification summary to the published PR
+    description.
+
+    Steps:
+    1. Read the summary at
+       /tmp/nia-visual-evidence/issue-{{issue_id}}/verification-summary.md (if present)
+       and the two screenshots at
+       /tmp/nia-visual-evidence/issue-{{issue_id}}/before.png and after.png.
+    2. Upload each screenshot as a GitHub PR attachment (use the `github-pr-media` skill
+       if available, otherwise use the standard `gh`/GitHub user-attachments upload
+       flow) and get their rendered `![...](...)` markdown.
+    3. Update the PR body (get current body with
+       `gh pr view {{pr_id}} --json body -q .body`, write the new body to a temp file,
+       then apply it with `gh pr edit {{pr_id}} --body-file PATH` — never inline a
+       file-sourced body with --body) to append a new section:
+
+       ## Visual Verification
+
+       ### Before
+       <uploaded before image>
+
+       ### After
+       <uploaded after image>
+
+       ### Playwright Test Summary
+       <contents of verification-summary.md, or a written summary of what was tested
+       and the result if that file is missing>
+
+    4. Once the images are confirmed rendering in the PR, clean up the local files
+       under /tmp/nia-visual-evidence/issue-{{issue_id}}/.
+
+    If uploading the images fails, still update the PR body with the written Playwright
+    Test Summary text (without images) so the analysis isn't lost, and report what
+    couldn't be attached.
+    """, context = ["pr", "issue"], share_session_with = "playwright_verify" }
+on_success = "monitor_pr_status"
+on_failure = "monitor_pr_status"
+
+[[workflow.states]]
+name = "monitor_pr_status"
+description = "Monitoring PR status for readiness before starting review (max 15m)"
+operation = { id = "monitor-pr", type = "agent", prompt = """
+    Monitor the PR status and determine if it's ready for review:
+
+    1. Check if CI checks have completed (passed or failed)
+    2. Check for any merge conflicts
+    3. Check if Copilot/AI code review has been REQUESTED on this PR
+       - Use `gh pr view --json reviewRequests` to check for AI review requests
+       - Only wait for AI review if it was explicitly requested
+
+    Decision logic:
+    - IF AI review was requested AND is not complete: wait up to 15 mins
+    - IF AI review was NOT requested: proceed immediately (do not wait for it)
+    - IF CI checks are still running: wait up to 15 mins
+
+    Output:
+    - Report whether AI review is expected: "AI review: requested" or "AI review: not requested"
+    - Report CI status: "CI: passed/failed/running"
+    - Return READY when conditions met, or TIMEOUT after 15 mins
+    """, context = ["pr"], share_session_with = "pr_draft"}
+on_success = "pr_review"
+on_failure = "pr_review"
+
+# ============================================================================
+# PR REVIEW AND MERGE PHASE
+# ============================================================================
+
+[[workflow.states]]
+name = "pr_review"
+description = "Reviewing the pull request state"
+command = { target = "pr", operation = "review" }
+on_success = "await_pr_approval"
+on_failure = "await_pr_approval"
+
+[[workflow.states]]
+name = "await_pr_approval"
+description = "Please read & edit PR review before fixing review items"
+on_success = "pr_merge"
+on_failure = "pr_rejected"
+
+[workflow.states.approval]
+gate_id = "pr_approval"
+message = "PR review is ready. Read & edit, then approve to begin fixing issues blocking the merge."
+timeout_seconds = 86400
+
+[[workflow.states]]
+name = "pr_merge"
+description = "Fixing issues blocking the pull request from merging"
+command = { target = "pr", operation = "merge" }
+on_success = "await_completion"
+on_failure = "merge_failed"
+
+[[workflow.states]]
+name = "await_completion"
+description = "PR ready to merge - confirm workflow completion"
+on_success = "completed"
+on_failure = "completed"
+
+[workflow.states.approval]
+gate_id = "completion_ack"
+message = "PR is ready to merge! Approve to mark workflow as complete."
+timeout_seconds = 86400
+
+# ============================================================================
+# TERMINAL STATES
+# ============================================================================
+
+[workflow.terminal_states]
+success = ["completed"]
+failed = ["draft_failed", "draft_rejected", "plan_failed", "plan_rejected",
+          "before_snapshot_failed", "code_iteration_rejected", "review_rejected",
+          "fix_failed", "visual_verification_failed", "pr_failed", "pr_rejected",
+          "merge_failed"]
+
+[[workflow.states]]
+name = "completed"
+description = "Workflow completed successfully - PR merged with visual evidence attached"
+
+[[workflow.states]]
+name = "draft_failed"
+description = "Failed to generate issue draft"
+
+[[workflow.states]]
+name = "draft_rejected"
+description = "Issue draft was rejected"
+
+[[workflow.states]]
+name = "plan_failed"
+description = "Failed to generate implementation plan"
+
+[[workflow.states]]
+name = "plan_rejected"
+description = "Implementation plan was rejected"
+
+[[workflow.states]]
+name = "before_snapshot_failed"
+description = "Could not capture the 'before' Playwright snapshot and intervention was rejected"
+
+[[workflow.states]]
+name = "code_iteration_rejected"
+description = "Resuming code creation was rejected"
+
+[[workflow.states]]
+name = "review_rejected"
+description = "Code review was rejected"
+
+[[workflow.states]]
+name = "fix_failed"
+description = "Auto-fix failed to apply"
+
+[[workflow.states]]
+name = "visual_verification_failed"
+description = "Playwright verification did not pass and intervention was rejected"
+
+[[workflow.states]]
+name = "pr_failed"
+description = "PR creation failed after intervention"
+
+[[workflow.states]]
+name = "pr_rejected"
+description = "PR was rejected"
+
+[[workflow.states]]
+name = "merge_failed"
+description = "PR merge failed"
