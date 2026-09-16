@@ -526,3 +526,22 @@ dotnet build ProgressHomeHeating.Web/ProgressHomeHeating.Web.csproj
 dotnet build ProgressHomeHeating.Web/ProgressHomeHeating.Web.csproj
 grep -c "data-testid" ProgressHomeHeating.Web/Components/Billing/BillingPanel.razor
 ```
+
+## Post-review auto-fix addendum (Minor-2)
+
+Code review noted that `Billing.razor` had no explicit UI state for "customer directory loaded
+successfully but returned zero customers" — every other state (loading, unavailable, loaded) had
+an explicit branch except this one, which would previously render an empty `<select>` with no
+explanatory text. Fixed by adding an `else if (customers.Count == 0)` branch between the
+`customersUnavailable` branch and the customer-selector branch, rendering:
+
+```razor
+<p class="text-muted" data-testid="billing-no-customers">
+    No customers are available yet. Billing information will appear here once a customer is added.
+</p>
+```
+
+No dedicated bUnit test was added for this branch: `Billing.razor` (unlike `BillingPanel.razor`)
+depends on the concrete `OperationsApiClient` (not an interface), and no fake/mock for it exists in
+`ProgressHomeHeating.Web.Tests` yet. Building that test infrastructure was judged disproportionate
+for this minor, low-risk UI branch; revisit if `OperationsApiClient` gains a testable seam.

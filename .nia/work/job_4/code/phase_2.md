@@ -871,3 +871,41 @@ curl -i http://localhost:5311/health
 ```
 
 Stop the background process with `kill <PID>` when finished.
+
+## Post-review auto-fix addendum (Major-2)
+
+Code review flagged that idempotency-key replay accepted **any** payload as long as the header
+matched a previously-seen key, without checking that the amount/currency/payment method were the
+same as the original request. This has since been corrected:
+
+- `Billing/BillingRecords.cs` — `BillingAccountRecord.IdempotencyKeys` is now
+  `Dictionary<string, IdempotencyRecord>` (was `Dictionary<string, string>`), where
+  `IdempotencyRecord(string IntentId, long AmountCents, string Currency, string PaymentMethod)`
+  captures the original request payload alongside the resulting intent id.
+- `Billing/BillingRecords.cs` — `PaymentApplication` gained a `Mismatched` flag (`Intent` is now
+  nullable, non-null only when `Mismatched` is `false`); added `PaymentReplayKind` enum
+  (`NotFound`/`Matched`/`Mismatched`) and `PaymentReplayResult` record used by the new
+  `IBillingStore.FindReplay(CreatePaymentIntentRequest, string)` signature (previously
+  `FindReplay(Guid customerId, string idempotencyKey)` returning `PaymentIntentRecord?`).
+- `Billing/BillingStore.cs` — `FindReplay` and `ApplyPayment` share a private
+  `ResolveReplay(account, idempotencyKey, request)` helper (must be called under `account.Gate`)
+  that compares the stored `IdempotencyRecord` against the incoming request; a key reused with a
+  different amount/currency/method returns `PaymentReplayKind.Mismatched` instead of the original
+  intent.
+- `Endpoints/BillingEndpoints.cs` — the `POST /v1/payment_intents` handler now branches on
+  `PaymentReplayKind`: `Matched` replays the original intent as before (`200 OK` +
+  `Idempotency-Replayed: true`), `Mismatched` returns `409 Conflict` with a
+  `BillingErrorDto(BillingErrorCodes.IdempotencyKeyMismatch, ...)` body, and `NotFound` proceeds to
+  validation as before. `ApplyPayment`'s own internal re-check (guards a race between the
+  pre-validation lookup and the locked apply) also surfaces as `409 Conflict` via
+  `application.Mismatched`.
+- `ProgressHomeHeating.Contracts/BillingContracts.cs` — added
+  `BillingErrorCodes.IdempotencyKeyMismatch = "idempotency_key_mismatch"`.
+- `ProgressHomeHeating.BillingApi.Tests/BillingEndpointsTests.cs` — added
+  `Reusing_an_idempotency_key_with_different_parameters_is_rejected`, which posts twice with the
+  same `Idempotency-Key` but different amounts and asserts the second response is `409 Conflict`
+  with `idempotency_key_mismatch`, the balance only reflects the first (accepted) payment, and the
+  original intent is still retrievable by id.
+
+No behavior change for the existing "same key, same payload" replay path — the existing
+`Repeating_an_idempotency_key_does_not_charge_twice` test still passes unmodified.

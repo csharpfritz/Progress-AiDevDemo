@@ -79,3 +79,40 @@ PHASE-3 and PHASE-4 may be executed in parallel.
 - [x] AC-014 Correlated traces/logs across `web` and `billingapi`
 - [x] AC-015 xUnit coverage of API + page workflows
 - [x] AC-016 Full solution starts via `aspire run` with no extra steps
+
+## Post-review auto-fix (Critical / Major / Minor scope)
+
+Applied against `review.md` findings; see the addenda in `phase_2.md`, `phase_4.md`, and
+`phase_5.md` for full detail. No Critical issues were found in the review.
+
+- [x] **FIX-Major-1** Investigated `dotnet test ProgressHomeHeating.slnx` "Zero tests ran" report.
+      Confirmed this is flaky, environment-level Microsoft Testing Platform orchestrator behavior
+      (fails in ~100ms, before any test could run), reproducible identically before and after all
+      other fixes below — **not a defect in the billing feature code**. No source change made;
+      documented a reliable workaround (run each test project's compiled binary directly) in
+      `README.md` and `phase_5.md`.
+- [x] **FIX-Major-2** Idempotency-key replay now validates the replayed request's
+      amount/currency/payment method against the originally recorded request. A key reused with
+      different parameters returns `409 Conflict` + `BillingErrorCodes.IdempotencyKeyMismatch`
+      instead of silently replaying the original result.
+      Files: `ProgressHomeHeating.Contracts/BillingContracts.cs`,
+      `ProgressHomeHeating.BillingApi/Billing/BillingRecords.cs`,
+      `ProgressHomeHeating.BillingApi/Billing/BillingStore.cs`,
+      `ProgressHomeHeating.BillingApi/Endpoints/BillingEndpoints.cs`.
+      Test added: `BillingEndpointsTests.Reusing_an_idempotency_key_with_different_parameters_is_rejected`.
+- [x] **FIX-Minor-1** No code change (documented as an accepted, demo-scoped limitation in
+      `review.md`); unbounded per-GUID account creation is inherent to the no-auth design (DEC-003)
+      and out of scope for a targeted fix.
+- [x] **FIX-Minor-2** `Billing.razor` now shows an explicit "No customers are available yet." empty
+      state (`data-testid="billing-no-customers"`) when the customer directory loads successfully
+      but returns zero customers, instead of silently rendering an empty selector.
+      File: `ProgressHomeHeating.Web/Components/Pages/Billing.razor`.
+- [x] **FIX-Minor-3** Added a clarifying comment to the `PayableCents` test helper explaining the
+      500-cent safety margin assumption.
+      File: `ProgressHomeHeating.BillingApi.Tests/BillingEndpointsTests.cs`.
+
+**Validation:** `dotnet build ProgressHomeHeating.slnx` — 0 errors, 0 warnings. Both test
+assemblies pass in full when run directly: `ProgressHomeHeating.BillingApi.Tests` 23/23 (22
+original + 1 new), `ProgressHomeHeating.Web.Tests` 8/8 (unchanged, all still green after the
+`Billing.razor` change — no existing test exercises the new empty-customers branch, see
+`phase_4.md` addendum for why).

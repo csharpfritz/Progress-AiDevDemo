@@ -805,3 +805,31 @@ dotnet build ProgressHomeHeating.slnx
 dotnet test ProgressHomeHeating.slnx
 cd ProgressHomeHeating.AppHost && aspire run
 ```
+
+## Post-review auto-fix addendum (Major-1, Minor-3)
+
+**Major-1 — `dotnet test ProgressHomeHeating.slnx` intermittently reports "Zero tests ran".**
+Investigation during the auto-fix pass found this is a flaky, environment-level issue in the
+Microsoft Testing Platform's solution-level test orchestrator (both new test projects have
+`UseMicrosoftTestingPlatformRunner`/`TestingPlatformDotnetTestSupport` already correctly set), **not
+a defect in the billing feature code**: the failing runs consistently fail in ~100ms (too fast to
+have executed anything), while running each test project's compiled binary directly
+(`./bin/Debug/net10.0/<Project>.Tests`) — or `dotnet test` from inside each individual test
+project's own directory shortly after a clean rebuild — passes reliably (22–23/22–23 and 8/8). No
+code or `.csproj` change was made for this, since the flakiness reproduces identically before and
+after the Major-2/Minor-2/Minor-3 fixes below, confirming it is unrelated to this issue's changes.
+If this proves reproducible in CI, the reliable workaround is to run each test project directly
+rather than through `dotnet test <solution>.slnx`:
+
+```bash
+dotnet build ProgressHomeHeating.slnx
+./ProgressHomeHeating.BillingApi.Tests/bin/Debug/net10.0/ProgressHomeHeating.BillingApi.Tests
+./ProgressHomeHeating.Web.Tests/bin/Debug/net10.0/ProgressHomeHeating.Web.Tests
+```
+
+**Minor-3 — `PayableCents` test helper had an undocumented magic constant.** Added a comment above
+`BillingEndpointsTests.PayableCents` explaining the `500`-cent safety margin and noting it should be
+revisited if `DeterministicBillingSeeder`'s amount/invoice-count ranges change.
+
+**New test added for Major-2** (idempotency-key payload validation — see the PHASE-2 addendum):
+`BillingEndpointsTests.Reusing_an_idempotency_key_with_different_parameters_is_rejected`.

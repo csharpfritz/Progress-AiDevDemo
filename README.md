@@ -53,6 +53,15 @@ dotnet test ProgressHomeHeating.slnx
 The solution uses xUnit v3 on the Microsoft Testing Platform, which the .NET 10 SDK requires; the
 opt-in lives in `global.json`.
 
+> **Note:** solution-level `dotnet test` can intermittently report "Zero tests ran" due to a known
+> flakiness in the Testing Platform's multi-project orchestrator. If that happens, run each test
+> project directly instead:
+> ```bash
+> dotnet build ProgressHomeHeating.slnx
+> ./ProgressHomeHeating.BillingApi.Tests/bin/Debug/net10.0/ProgressHomeHeating.BillingApi.Tests
+> ./ProgressHomeHeating.Web.Tests/bin/Debug/net10.0/ProgressHomeHeating.Web.Tests
+> ```
+
 ### Agent Chat configuration
 
 The Agent Chat page needs Azure OpenAI credentials to become active. Set them as user secrets (or
