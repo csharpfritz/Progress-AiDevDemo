@@ -485,5 +485,6 @@ $RECYCLE.BIN/
 # Nia/Forge context ignores
 .nia/**/.sessions.lock
 .nia/**/sessions.toml
+.nia/**/context.toml
 # Playwright CLI output (may contain credentials)
 .playwright-cli/
