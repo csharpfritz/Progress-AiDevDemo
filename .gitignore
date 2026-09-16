@@ -486,5 +486,7 @@ $RECYCLE.BIN/
 .nia/**/.sessions.lock
 .nia/**/sessions.toml
 .nia/**/context.toml
+.nia/**/.context.lock
+.nia/**/.worflow.lock
 # Playwright CLI output (may contain credentials)
 .playwright-cli/
