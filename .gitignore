@@ -487,6 +487,9 @@ $RECYCLE.BIN/
 .nia/**/sessions.toml
 .nia/**/context.toml
 .nia/**/.context.lock
-.nia/**/.worflow.lock
+.nia/**/.workflow.lock
+# Playwright visual-evidence snapshots saved into job working folders
+.nia/**/visual-evidence/
 # Playwright CLI output (may contain credentials)
 .playwright-cli/
+

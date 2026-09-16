@@ -1,0 +1,106 @@
+# ============================================================================
+# Temp Visual (scratch) Workflow
+# ============================================================================
+#
+# Scratch workflow: capture a "before" Playwright snapshot into the current
+# job's own working directory (.nia/work/job_<N>/), not /tmp, then attach it
+# as a comment on the current PR.
+#
+# Usage:
+#   nia workflow run temp-visual
+#
+# ============================================================================
+
+workflow_schema_version = "1.0.0"
+
+[workflow]
+name = "temp-visual"
+description = "Scratch workflow: capture a 'before' Playwright snapshot into the current job's working folder and attach it as a PR comment."
+version = "0.1.0"
+required_context = ["issue_id"]
+
+[workflow.initial_state]
+name = "capture_before_snapshot"
+
+# ============================================================================
+# BEFORE-CHANGE VISUAL BASELINE (Playwright, saved into the job folder)
+# ============================================================================
+
+[[workflow.states]]
+name = "capture_before_snapshot"
+description = "Capturing 'before' Playwright snapshot into the job folder"
+operation = { id = "capture-before", type = "agent", prompt = """
+    Capture a "before" visual baseline using Playwright, before making any changes for
+    this issue. Follow the `playwright-cli` and `pr-screenshot-workflow` skills.
+
+    Steps:
+    1. Ensure the app is running: from `ProgressHomeHeating.AppHost/`, run `aspire run`
+       if it is not already running (see `aspire-orchestration` skill).
+    2. Find the `web` resource's live URL via `aspire ps` (see `aspire-monitoring` skill).
+    3. Find this job's own working directory from the `<current_job><job_directory>`
+       note in your context (e.g. `.nia/work/job_8/`), and create an evidence folder
+       inside it: `mkdir -p <job_directory>/visual-evidence`
+    4. Using `playwright-cli`, navigate to the page(s)/feature(s) relevant to this issue
+       and save (substituting the real job directory for `<job_directory>`):
+       - `playwright-cli snapshot --filename=<job_directory>/visual-evidence/before.yml`
+       - `playwright-cli screenshot --filename=<job_directory>/visual-evidence/before.png`
+       - `playwright-cli close`
+
+    Error handling:
+    - If the app cannot be started or the relevant page cannot be reached, report the
+      exact error and STOP — do not fabricate a screenshot.
+    """, context = ["issue"] }
+on_success = "attach_snapshot_to_pr"
+on_failure = "capture_failed"
+
+# ============================================================================
+# ATTACH SNAPSHOT — post the before.png as a comment on the current PR
+# ============================================================================
+
+[[workflow.states]]
+name = "attach_snapshot_to_pr"
+description = "Attaching the 'before' snapshot as a comment on the current PR"
+operation = { id = "attach-snapshot", type = "agent", prompt = """
+    Attach the "before" screenshot just captured to the current pull request as a
+    comment. Follow the `pr-screenshot-workflow` and `pr-read-github` skills.
+
+    Steps:
+    1. Find this job's working directory from your `<current_job><job_directory>`
+       context (e.g. `.nia/work/job_8/`) and locate
+       `<job_directory>/visual-evidence/before.png`.
+    2. Determine the current PR number (e.g. `gh pr view --json number -q .number`,
+       run from the current branch).
+    3. Upload `before.png` so it has a renderable GitHub URL (use the
+       `github-pr-media` skill if available, otherwise the standard `gh`/GitHub
+       user-attachments upload flow), then post it as a PR comment:
+       `gh pr comment <pr_number> --body-file PATH`, where the file contains the
+       uploaded image's `![...](...)` markdown under a short "Before" heading.
+    4. Confirm the comment was created (e.g. re-run `gh pr view <pr_number> --comments`
+       and check it appears).
+
+    Error handling:
+    - If there is no open PR for the current branch, or the upload fails, report the
+      exact error and STOP — do not fabricate a comment.
+    """, context = ["issue"], share_session_with = "capture_before_snapshot" }
+on_success = "completed"
+on_failure = "attach_failed"
+
+# ============================================================================
+# TERMINAL STATES
+# ============================================================================
+
+[workflow.terminal_states]
+success = ["completed"]
+failed = ["capture_failed", "attach_failed"]
+
+[[workflow.states]]
+name = "completed"
+description = "'Before' snapshot captured into the job folder and posted as a PR comment"
+
+[[workflow.states]]
+name = "capture_failed"
+description = "Failed to capture the 'before' snapshot"
+
+[[workflow.states]]
+name = "attach_failed"
+description = "Failed to attach the 'before' snapshot as a PR comment"

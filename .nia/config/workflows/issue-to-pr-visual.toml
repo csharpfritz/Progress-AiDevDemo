@@ -102,12 +102,12 @@ operation = { id = "capture-before", type = "agent", prompt = """
        if it is not already running (see `aspire-orchestration` skill).
     2. Find the `web` resource's live URL via `aspire ps` / the Aspire dashboard (see
        `aspire-monitoring` skill). Do not guess a fixed port.
-    3. Create the evidence directory: `mkdir -p /tmp/nia-visual-evidence/issue-{{issue_id}}`
+    3. Create the evidence directory: `mkdir -p .nia/work/job_{{issue_id}}/visual-evidence`
     4. Using `playwright-cli`:
        - `playwright-cli open <web-url>`
        - Navigate to the page(s)/feature(s) relevant to this issue.
-       - `playwright-cli snapshot --filename=/tmp/nia-visual-evidence/issue-{{issue_id}}/before.yml`
-       - `playwright-cli screenshot --filename=/tmp/nia-visual-evidence/issue-{{issue_id}}/before.png`
+       - `playwright-cli snapshot --filename=.nia/work/job_{{issue_id}}/visual-evidence/before.yml`
+       - `playwright-cli screenshot --filename=.nia/work/job_{{issue_id}}/visual-evidence/before.png`
        - `playwright-cli close`
     5. If the feature spans multiple pages/states, capture one screenshot per page as
        `before-<page>.png` and list every file captured.
@@ -122,7 +122,7 @@ on_failure = "retry_before_snapshot"
 [[workflow.states]]
 name = "verify_before_snapshot"
 description = "Verifying 'before' snapshot was saved"
-operation = { id = "before-snapshot-exists", type = "file_exists", path = "/tmp/nia-visual-evidence/issue-{{issue_id}}/before.png", on_false = "fail" }
+operation = { id = "before-snapshot-exists", type = "file_exists", path = ".nia/work/job_{{issue_id}}/visual-evidence/before.png", on_false = "fail" }
 on_success = "create_code"
 on_failure = "retry_before_snapshot"
 
@@ -133,7 +133,7 @@ operation = { id = "retry-capture-before", type = "agent", prompt = """
     The "before" Playwright snapshot was not saved successfully. Retry capturing it:
     ensure the app is running (`aspire run` / `aspire ps`), then repeat the
     `playwright-cli` steps to save
-    /tmp/nia-visual-evidence/issue-{{issue_id}}/before.png and before.yml.
+    .nia/work/job_{{issue_id}}/visual-evidence/before.png and before.yml.
     Report the exact error if it fails again.
     """, context = ["issue"], share_session_with = "capture_before_snapshot" }
 on_success = "verify_before_snapshot_retry"
@@ -142,7 +142,7 @@ on_failure = "await_before_snapshot_intervention"
 [[workflow.states]]
 name = "verify_before_snapshot_retry"
 description = "Verifying 'before' snapshot after retry"
-operation = { id = "before-snapshot-exists-retry", type = "file_exists", path = "/tmp/nia-visual-evidence/issue-{{issue_id}}/before.png", on_false = "fail" }
+operation = { id = "before-snapshot-exists-retry", type = "file_exists", path = ".nia/work/job_{{issue_id}}/visual-evidence/before.png", on_false = "fail" }
 on_success = "create_code"
 on_failure = "await_before_snapshot_intervention"
 
@@ -154,7 +154,7 @@ on_failure = "before_snapshot_failed"
 
 [workflow.states.approval]
 gate_id = "before_snapshot_intervention"
-message = "Could not automatically capture the 'before' Playwright snapshot. Capture one manually (see the playwright-cli skill) and save it to /tmp/nia-visual-evidence/issue-{{issue_id}}/before.png, then approve to continue. Reject to abort."
+message = "Could not automatically capture the 'before' Playwright snapshot. Capture one manually (see the playwright-cli skill) and save it to .nia/work/job_{{issue_id}}/visual-evidence/before.png, then approve to continue. Reject to abort."
 timeout_seconds = 86400
 
 # ============================================================================
@@ -289,10 +289,10 @@ operation = { id = "capture-after", type = "agent", prompt = """
        `aspire restart` if needed — see `aspire-orchestration` skill).
     2. Find the current `web` resource URL via `aspire ps` (see `aspire-monitoring` skill).
     3. Using `playwright-cli`, navigate to the same page(s)/feature(s) captured in the
-       "before" snapshot at /tmp/nia-visual-evidence/issue-{{issue_id}}/before.yml.
+       "before" snapshot at .nia/work/job_{{issue_id}}/visual-evidence/before.yml.
     4. Save:
-       - `playwright-cli snapshot --filename=/tmp/nia-visual-evidence/issue-{{issue_id}}/after.yml`
-       - `playwright-cli screenshot --filename=/tmp/nia-visual-evidence/issue-{{issue_id}}/after.png`
+       - `playwright-cli snapshot --filename=.nia/work/job_{{issue_id}}/visual-evidence/after.yml`
+       - `playwright-cli screenshot --filename=.nia/work/job_{{issue_id}}/visual-evidence/after.png`
        - `playwright-cli close`
     5. Use the same page(s)/naming convention as the "before" capture so the two can be
        compared side by side.
@@ -312,7 +312,7 @@ approval_message = "Visual verification has required 5 iterations. Review progre
 [[workflow.states]]
 name = "verify_after_snapshot"
 description = "Verifying 'after' snapshot was saved"
-operation = { id = "after-snapshot-exists", type = "file_exists", path = "/tmp/nia-visual-evidence/issue-{{issue_id}}/after.png", on_false = "fail" }
+operation = { id = "after-snapshot-exists", type = "file_exists", path = ".nia/work/job_{{issue_id}}/visual-evidence/after.png", on_false = "fail" }
 on_success = "playwright_verify"
 on_failure = "retry_after_snapshot"
 
@@ -323,7 +323,7 @@ operation = { id = "retry-capture-after", type = "agent", prompt = """
     The "after" Playwright snapshot was not saved successfully. Retry capturing it:
     ensure the app is running (`aspire run` / `aspire ps`), then repeat the
     `playwright-cli` steps to save
-    /tmp/nia-visual-evidence/issue-{{issue_id}}/after.png and after.yml.
+    .nia/work/job_{{issue_id}}/visual-evidence/after.png and after.yml.
     Report the exact error if it fails again.
     """, context = ["issue"], share_session_with = "capture_after_snapshot" }
 on_success = "verify_after_snapshot_retry"
@@ -332,7 +332,7 @@ on_failure = "await_visual_verification_intervention"
 [[workflow.states]]
 name = "verify_after_snapshot_retry"
 description = "Verifying 'after' snapshot after retry"
-operation = { id = "after-snapshot-exists-retry", type = "file_exists", path = "/tmp/nia-visual-evidence/issue-{{issue_id}}/after.png", on_false = "fail" }
+operation = { id = "after-snapshot-exists-retry", type = "file_exists", path = ".nia/work/job_{{issue_id}}/visual-evidence/after.png", on_false = "fail" }
 on_success = "playwright_verify"
 on_failure = "await_visual_verification_intervention"
 
@@ -344,7 +344,7 @@ on_failure = "visual_verification_failed"
 
 [workflow.states.approval]
 gate_id = "after_snapshot_intervention"
-message = "Could not automatically capture the 'after' Playwright snapshot. Capture one manually and save it to /tmp/nia-visual-evidence/issue-{{issue_id}}/after.png, then approve to continue verification. Reject to abort."
+message = "Could not automatically capture the 'after' Playwright snapshot. Capture one manually and save it to .nia/work/job_{{issue_id}}/visual-evidence/after.png, then approve to continue verification. Reject to abort."
 timeout_seconds = 86400
 
 # State: Gate — actually drive the browser with Playwright and verify correctness
@@ -360,11 +360,11 @@ operation = { id = "playwright-verify", type = "agent", prompt = """
     1. Using `playwright-cli`, exercise every user flow touched by this issue: click
        through the changed page(s), submit forms, trigger the changed behavior, etc.
     2. Compare against the "before" snapshot at
-       /tmp/nia-visual-evidence/issue-{{issue_id}}/before.yml and the issue's acceptance
+       .nia/work/job_{{issue_id}}/visual-evidence/before.yml and the issue's acceptance
        criteria — confirm the change behaves as intended and nothing else regressed.
        Check `playwright-cli console` for new errors/warnings.
     3. Write a verification summary to
-       /tmp/nia-visual-evidence/issue-{{issue_id}}/verification-summary.md containing:
+       .nia/work/job_{{issue_id}}/visual-evidence/verification-summary.md containing:
        - A bullet list of each flow/page tested and the outcome (pass/fail)
        - Any console errors observed
        - A one-paragraph overall verdict
@@ -382,7 +382,7 @@ name = "fix_verification_issues"
 description = "Fixing issues found by Playwright verification"
 operation = { id = "fix-verification-issues", type = "agent", prompt = """
     Playwright verification found issues with the current implementation. Read
-    /tmp/nia-visual-evidence/issue-{{issue_id}}/verification-summary.md and fix every
+    .nia/work/job_{{issue_id}}/visual-evidence/verification-summary.md and fix every
     issue it reports.
     """, context = ["issue"], share_session_with = "playwright_verify" }
 on_success = "capture_after_snapshot"
@@ -396,7 +396,7 @@ on_failure = "visual_verification_failed"
 
 [workflow.states.approval]
 gate_id = "visual_verification_approval"
-message = "Playwright verification has required multiple iterations, or the last auto-fix attempt failed. Review /tmp/nia-visual-evidence/issue-{{issue_id}}/verification-summary.md, make manual edits if needed, then approve to retry verification. Reject to stop."
+message = "Playwright verification has required multiple iterations, or the last auto-fix attempt failed. Review .nia/work/job_{{issue_id}}/visual-evidence/verification-summary.md, make manual edits if needed, then approve to retry verification. Reject to stop."
 timeout_seconds = 86400
 
 # ============================================================================
@@ -503,9 +503,9 @@ operation = { id = "attach-visual-evidence", type = "agent", prompt = """
 
     Steps:
     1. Read the summary at
-       /tmp/nia-visual-evidence/issue-{{issue_id}}/verification-summary.md (if present)
+       .nia/work/job_{{issue_id}}/visual-evidence/verification-summary.md (if present)
        and the two screenshots at
-       /tmp/nia-visual-evidence/issue-{{issue_id}}/before.png and after.png.
+       .nia/work/job_{{issue_id}}/visual-evidence/before.png and after.png.
     2. Upload each screenshot as a GitHub PR attachment (use the `github-pr-media` skill
        if available, otherwise use the standard `gh`/GitHub user-attachments upload
        flow) and get their rendered `![...](...)` markdown.
@@ -527,7 +527,7 @@ operation = { id = "attach-visual-evidence", type = "agent", prompt = """
        and the result if that file is missing>
 
     4. Once the images are confirmed rendering in the PR, clean up the local files
-       under /tmp/nia-visual-evidence/issue-{{issue_id}}/.
+       under .nia/work/job_{{issue_id}}/visual-evidence/.
 
     If uploading the images fails, still update the PR body with the written Playwright
     Test Summary text (without images) so the analysis isn't lost, and report what
