@@ -211,7 +211,10 @@ else
 
     private async Task OnAppointmentUpdate(SchedulerUpdateEventArgs args)
     {
-        if (args.Item is SchedulerAppointment appt)
+        if (args.Item is not SchedulerAppointment appt) return;
+
+        errorMessage = null;
+        try
         {
             await Api.UpdateOrderAsync(appt.OrderId, new UpdateDeliveryOrderRequest(
                 ScheduledDate: DateOnly.FromDateTime(appt.Start),
@@ -220,6 +223,10 @@ else
                 TruckId: null,
                 GallonsDelivered: null));
             await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Could not reschedule this delivery: {ex.Message}";
         }
     }
 
@@ -236,15 +243,22 @@ else
         selectedOrder = null;
         modalVisible = true;
 
-        var fresh = await Api.GetOrderAsync(appt.OrderId);
-        if (fresh is null)
+        try
         {
-            modalError = "This delivery no longer exists. Refresh the scheduler.";
-            return;
-        }
+            var fresh = await Api.GetOrderAsync(appt.OrderId);
+            if (fresh is null)
+            {
+                modalError = "This delivery no longer exists. Refresh the scheduler.";
+                return;
+            }
 
-        selectedOrder = fresh;
-        ResetEditFields();
+            selectedOrder = fresh;
+            ResetEditFields();
+        }
+        catch (Exception ex)
+        {
+            modalError = $"Could not load this delivery: {ex.Message}";
+        }
     }
 
     private void ResetEditFields()
