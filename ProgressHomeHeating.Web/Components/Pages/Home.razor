@@ -52,7 +52,19 @@ else
                 </ul>
             </div>
             <div class="surface-card flex-grow-1">
-                <h4>Local Weather — 5-Day Report</h4>
+                <div class="weather-header">
+                    <h4>Local Weather — 5-Day Report</h4>
+                    <div class="weather-unit-toggle" role="group" aria-label="Temperature unit">
+                        <button type="button"
+                                class="weather-unit-button @(useCelsius ? null : "active")"
+                                aria-pressed="@(!useCelsius)"
+                                @onclick="() => useCelsius = false">°F</button>
+                        <button type="button"
+                                class="weather-unit-button @(useCelsius ? "active" : null)"
+                                aria-pressed="@useCelsius"
+                                @onclick="() => useCelsius = true">°C</button>
+                    </div>
+                </div>
                 <div class="weather-strip">
                     @foreach (var day in forecast)
                     {
@@ -61,8 +73,8 @@ else
                             <div class="weather-icon" aria-hidden="true">@day.Icon</div>
                             <div class="weather-condition">@day.Condition</div>
                             <div class="weather-temps">
-                                <span class="weather-high">@day.HighF&deg;</span>
-                                <span class="weather-low">@day.LowF&deg;</span>
+                                <span class="weather-high">@FormatTemperature(day.HighF)</span>
+                                <span class="weather-low">@FormatTemperature(day.LowF)</span>
                             </div>
                         </div>
                     }
@@ -88,6 +100,7 @@ else
 
 @code {
     private bool loading = true;
+    private bool useCelsius;
     private int customerCount;
     private List<OilTankDto> lowTanks = [];
     private List<DeliveryOrderDto> upcomingOrders = [];
@@ -102,6 +115,12 @@ else
         upcomingOrders = allOrders.OrderBy(o => o.ScheduledDate).ToList();
         forecast = BuildFiveDayForecast();
         loading = false;
+    }
+
+    private string FormatTemperature(int fahrenheit)
+    {
+        var temperature = useCelsius ? (int)Math.Round((fahrenheit - 32) * 5d / 9d) : fahrenheit;
+        return $"{temperature}°{(useCelsius ? "C" : "F")}";
     }
 
     // Demo data for a heating-oil company: always cold, and trending colder
