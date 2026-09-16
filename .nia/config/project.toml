@@ -3,8 +3,8 @@ schema_version = "1.0.0"
 [project]
 name = "Progress.DevAiDemos"
 description = "A sample project that uses Aspire, Blazor, Microsoft Agent Framework and Progress Observability"
-language = "csharp"  # Change to your primary language
-framework = "dotnet"  # Update with your framework (e.g., "actix-web", "axum")
+language = "csharp"
+framework = "dotnet"
 testing_framework = "xunit"
 package_manager = "dotnet"
 
