@@ -1,0 +1,266 @@
+# ============================================================================
+# Issue-to-PR Lite Workflow
+# ============================================================================
+#
+# Lightweight workflow for simple issue resolution. Designed for tutorials
+# and straightforward development tasks. Uses --lite flag for faster iteration.
+#
+# Key differences from full issue-to-pr:
+# - Streamlined approval gates for faster iteration
+# - Uses --lite flag for plan and review steps
+# - Designed for tutorials and simple development tasks
+#
+# Usage:
+#   nia workflow run issue-to-pr-lite
+#
+# Prerequisites:
+# - Issue context set via `nia config set-issue <number>`
+# - Agent authenticated
+#
+# ============================================================================
+
+workflow_schema_version = "1.0.0"
+
+[workflow]
+name = "issue-to-pr-lite"
+description = "Full issue-to-PR lifecycle for a low-risk, simple issue (tutorials, small well-understood tasks): draft, plan, code, review, and PR, but with reduced planning/review depth and fewer approval gates than a thorough review requires."
+version = "1.0.0"
+required_context = ["issue_id"]
+
+[workflow.loop_detection]
+max_transitions = 100
+on_loop_detected = "approval_gate"
+
+[workflow.initial_state]
+name = "draft_issue"
+
+# ============================================================================
+# ISSUE DRAFTING PHASE
+# ============================================================================
+
+# State: Draft the issue from context
+[[workflow.states]]
+name = "draft_issue"
+description = "Drafting issue description"
+command = { target = "issue", operation = "draft" }
+on_success = "await_draft_approval"
+on_failure = "draft_failed"
+
+# State: Await draft approval
+[[workflow.states]]
+name = "await_draft_approval"
+description = "Please review & edit issue before continuing with planning"
+on_success = "plan_implementation"
+on_failure = "draft_rejected"
+
+[workflow.states.approval]
+gate_id = "draft_approval"
+message = "Issue draft is ready. Please review & edit issue before approving for planning"
+timeout_seconds = 86400
+
+# ============================================================================
+# PLANNING PHASE
+# ============================================================================
+
+[[workflow.states]]
+name = "plan_implementation"
+description = "Creating lightweight implementation plan"
+command = { target = "issue", operation = "plan", modifiers = ["lite"] }
+on_success = "await_plan_approval"
+on_failure = "plan_failed"
+
+[[workflow.states]]
+name = "await_plan_approval"
+description = "Review & edit plan before code generation"
+on_success = "create_code"
+on_failure = "plan_rejected"
+
+[workflow.states.approval]
+gate_id = "plan_approval"
+message = "Lite plan is ready. Review & edit before approving for code generation"
+timeout_seconds = 86400
+
+# ============================================================================
+# CODE GENERATION LOOP (Same as full workflow)
+# ============================================================================
+
+[[workflow.states]]
+name = "create_code"
+description = "Generating code from plan"
+max_visits = 30
+loop_enabled = true
+loop_counter = "code_iterations"
+command = { target = "code", operation = "create" }
+on_success = "check_tasks"
+on_failure = "retry_code_create"
+
+[[workflow.states.escape_conditions]]
+counter_value = 10
+action = "approval"
+approval_gate = "await_iteration_approval"
+approval_message = "Code generation has required 10 iterations. Review progress."
+
+[[workflow.states]]
+name = "await_iteration_approval"
+description = "Code generation milestone reached"
+on_success = "create_code"
+on_failure = "review_rejected"
+
+[workflow.states.approval]
+gate_id = "code_approval"
+message = "Code generation milestone. Review progress before continuing."
+timeout_seconds = 86400
+
+[[workflow.states]]
+name = "retry_code_create"
+description = "Retrying code creation"
+command = { target = "code", operation = "create", modifiers = ["retry"] }
+max_visits = 30
+on_success = "check_tasks"
+on_failure = "create_code"
+
+[[workflow.states]]
+name = "check_tasks"
+description = "Checking if tasks are completed"
+operation = { id = "tasks_done", type = "tasks_complete", on_false = "fail" }
+max_visits = 30
+on_success = "code_review"
+on_failure = "create_code"
+
+# ============================================================================
+# CODE REVIEW PHASE (Lite - fewer gates)
+# ============================================================================
+
+[[workflow.states]]
+name = "code_review"
+description = "Reviewing generated code (lite)"
+is_exit_point = true
+command = { target = "code", operation = "review", modifiers = ["lite"] }
+on_success = "auto_fix_issues"
+on_failure = "auto_fix_issues"
+
+[[workflow.states]]
+name = "auto_fix_issues"
+description = "Fixing issues from review"
+command = { target = "code", operation = "review", modifiers = ["auto-fix", "issues"] }
+on_success = "create_pr"
+on_failure = "create_pr"
+
+# ============================================================================
+# PR CREATION PHASE (Streamlined)
+# ============================================================================
+
+[[workflow.states]]
+name = "create_pr"
+description = "Create PR with standard format"
+is_exit_point = true  # --ends-at target for the obsolete 'issue-to-review-lite' alias
+operation = { id = "create-pr", type = "agent", prompt = """
+    Create a Pull Request from the current branch to the main branch.
+
+    Steps:
+    1. Get the current branch name using `git branch --show-current`
+    2. CRITICAL - Push local commits before creating PR:
+       a. Check branch status: `git status -sb`
+       b. If status shows "[ahead N, behind M]" (diverged):
+          STOP and report "Cannot push - branch has diverged from remote. Run 'git pull --rebase' to sync with remote first."
+       c. If status shows only "[ahead N]": proceed to push
+       d. Push changes: `git push -u origin <branch_name>`
+       e. Verify push succeeded by checking output
+       f. If push fails, STOP and report the error - do NOT force push
+    3. Create a PR with:
+       - Title: "Fixes #{issue_id} - {branch_name}"
+       - Body: "Fixes #{issue_id}"
+    4. Extract the PR number from the created PR
+    5. Run `nia config set-pr <PR_NUMBER>` to save the PR ID
+    6. Confirm the PR was created successfully
+
+    Error Handling:
+    - If push output contains "non-fast-forward" or "rejected":
+      Report "Push failed - remote branch has new commits you don't have locally. Run 'git pull --rebase origin <branch>' to sync, then try pushing again."
+    - If push output contains "permission" or "denied":
+      Report "Push failed - access denied. Verify repository permissions and authentication."
+    - For any other push failure:
+      Report "Push failed with error: [include full git error message]"
+    - CRITICAL: Never use --force, -f, --force-with-lease, or any forced push flags
+    """, context = ["issue"] }
+on_success = "pr_draft"
+on_failure = "await_pr_intervention"
+
+[[workflow.states]]
+name = "await_pr_intervention"
+description = "PR creation failed - manual intervention"
+on_success = "pr_draft"
+on_failure = "pr_failed"
+
+[workflow.states.approval]
+gate_id = "pr_intervention"
+message = "PR creation failed. Create PR manually, run 'nia config set-pr <PR_ID>', then approve."
+timeout_seconds = 86400
+
+[[workflow.states]]
+name = "pr_draft"
+description = "Generate PR description (lite)"
+command = { target = "pr", operation = "draft", modifiers = ["lite"] }
+on_success = "pr_publish"
+on_failure = "pr_publish"
+
+[[workflow.states]]
+name = "pr_publish"
+description = "Publish PR description to GitHub"
+command = { target = "pr", operation = "publish" }
+on_success = "pr_review"
+on_failure = "pr_review"
+
+[[workflow.states]]
+name = "pr_review"
+description = "Reviewing the pull request (lite)"
+command = { target = "pr", operation = "review", modifiers = ["lite"] }
+on_success = "await_completion"
+on_failure = "await_completion"
+
+[[workflow.states]]
+name = "await_completion"
+description = "PR ready - confirm completion"
+on_success = "completed"
+on_failure = "completed"
+
+[workflow.states.approval]
+gate_id = "completion_ack"
+message = "Lite workflow complete! PR is ready for review and merge."
+timeout_seconds = 86400
+
+# ============================================================================
+# TERMINAL STATES
+# ============================================================================
+
+[workflow.terminal_states]
+success = ["completed"]
+failed = ["draft_failed", "draft_rejected", "plan_failed", "plan_rejected", "review_rejected", "pr_failed"]
+
+[[workflow.states]]
+name = "completed"
+description = "Workflow completed - PR ready"
+
+[[workflow.states]]
+name = "draft_failed"
+description = "Failed to draft issue"
+
+[[workflow.states]]
+name = "draft_rejected"
+description = "Issue draft was rejected"
+
+[[workflow.states]]
+name = "plan_failed"
+description = "Failed to generate plan"
+
+[[workflow.states]]
+name = "plan_rejected"
+description = "Plan was rejected"
+
+[[workflow.states]]
+name = "review_rejected"
+description = "Code review was rejected"
+
+[[workflow.states]]
+name = "pr_failed"
+description = "PR creation failed"
