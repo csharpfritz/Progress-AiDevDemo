@@ -7,3 +7,23 @@ opted_out = false
 consent_date = "2026-08-31T13:14:50.464979700+00:00"
 consent_phrase = "i agree"
 consented_by = "nia"
+
+# Progress AI Observability Platform (OTLP) — https://collector.observability.progress.com
+[endpoint]
+url = "https://collector.observability.progress.com:443"
+protocol = "http"
+timeout_secs = 5
+
+[endpoint.headers]
+# Integration key (starts with "ac_p_", not the read-only "acm_" MCP key).
+# Header must be "x-api-key" with the raw key — "Authorization: Bearer" gets 401.
+x-api-key = "ac_p_001_3-G-QwbYCP9yH8sXXeFsVtzOBFIlcLaTkY-Kge6Ycsk:FAlrNaD_td_hH4lB2Bb53Wol88l3UdjyaY6HFmj5PL8"
+
+[collect]
+transactions = true
+traces = false
+logs = false
+
+[privacy]
+strict_privacy = false
+
