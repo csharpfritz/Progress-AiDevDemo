@@ -264,5 +264,11 @@ templates to copy from: `code-to-review`, `issue-to-plan`, `issue-to-pr`,
   streamlined variant with fewer approval gates and `--lite` plan/review
   modifiers, suited to tutorials and simple, low-risk issues; use it as a
   starting template when a full review-gated workflow is overkill.
+- [references/quick-fix-to-pr.toml](references/quick-fix-to-pr.toml) — a
+  minimal, self-contained variant for trivial one-line-scale changes: no
+  plan/review phase, a tight code-generation loop with an early escape gate,
+  and a PR chain copied verbatim from `issue-to-pr-lite.toml`; use it as a
+  starting template for the smallest, fastest-path workflows.
+
 
 

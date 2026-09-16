@@ -1,0 +1,333 @@
+# ============================================================================
+# Quick-Fix-to-PR Visual Workflow
+# ============================================================================
+#
+# Visual-verification variant of quick-fix-to-pr: still no plan/review phase
+# and still a trivial-magnitude fast path, but bracketed by Playwright
+# evidence since the "trivial" fix touches the UI:
+# - Before-change snapshot captured first (best-effort, non-blocking)
+# - After-change snapshot once the fix lands
+# - A Playwright functional-verification gate before the PR is created —
+#   failures loop back into a fix + re-verify, tightly bounded like the
+#   code-generation loop it sits next to
+# - The published PR gets both snapshots and the test summary attached
+#
+# Usage:
+#   nia workflow run quick-fix-to-pr-visual
+#
+# Prerequisites:
+# - Issue context set via `nia config set-issue <number>`
+# - Agent authenticated
+# - `playwright-cli` available; app is a .NET Aspire solution started via
+#   `aspire run` from ProgressHomeHeating.AppHost/ (see `aspire-orchestration`
+#   / `aspire-monitoring` skills for start + URL discovery)
+#
+# ============================================================================
+
+workflow_schema_version = "1.0.0"
+
+[workflow]
+name = "quick-fix-to-pr-visual"
+description = "For a trivial, one-line-scale UI change — no planning or review phase: generate the fix directly, bracket it with before/after Playwright snapshots, gate on a Playwright functional verification pass, then open a PR with both snapshots and the test summary attached, ready for manual review and merge."
+version = "0.1.0"
+required_context = ["issue_id"]
+
+[workflow.initial_state]
+name = "capture_before_snapshot"
+
+[workflow.entry_points]
+# Keep the ability to skip straight to the fix (no baseline capture),
+# matching quick-fix-to-pr's fast-entry philosophy.
+create_code = { requires = [] }
+
+# ============================================================================
+# BEFORE-CHANGE VISUAL BASELINE (Playwright, single attempt, non-blocking)
+# ============================================================================
+
+[[workflow.states]]
+name = "capture_before_snapshot"
+description = "Capturing 'before' Playwright snapshot"
+is_exit_point = true
+operation = { id = "capture-before", type = "agent", prompt = """
+    Capture a "before" visual baseline using Playwright, before making the fix for
+    this issue. Follow the `playwright-cli` and `pr-screenshot-workflow` skills.
+
+    Steps:
+    1. Ensure the app is running: from `ProgressHomeHeating.AppHost/`, run `aspire run`
+       if it is not already running (see `aspire-orchestration` skill).
+    2. Find the `web` resource's live URL via `aspire ps` (see `aspire-monitoring` skill).
+    3. `mkdir -p /tmp/nia-visual-evidence/issue-{{issue_id}}`
+    4. Using `playwright-cli`, navigate to the page/feature this issue touches and save:
+       - `playwright-cli snapshot --filename=/tmp/nia-visual-evidence/issue-{{issue_id}}/before.yml`
+       - `playwright-cli screenshot --filename=/tmp/nia-visual-evidence/issue-{{issue_id}}/before.png`
+       - `playwright-cli close`
+
+    This is a best-effort capture for a trivial fix — if the app can't be started or
+    reached, report the error and stop rather than forcing it.
+    """, context = ["issue"] }
+on_success = "create_code"
+on_failure = "create_code"
+
+# ============================================================================
+# CODE GENERATION — bounded tight, escape fires early (unchanged from
+# quick-fix-to-pr.toml)
+# ============================================================================
+
+[[workflow.states]]
+name = "create_code"
+description = "Generating the fix"
+command = { target = "code", operation = "create" }
+max_visits = 6
+loop_enabled = true
+loop_counter = "code_iterations"
+on_success = "capture_after_snapshot"
+on_failure = "create_code"
+
+[[workflow.states.escape_conditions]]
+counter_value = 2
+action = "approval"
+approval_gate = "iteration_gate"
+approval_message = "Quick-fix has required 2 iterations to pass code review. This may not be trivial — review before continuing, or re-route to a work-type flow."
+
+[[workflow.states]]
+name = "iteration_gate"
+description = "Escape fired — confirm this is still a quick fix"
+on_success = "create_code"
+on_failure = "code_iteration_rejected"
+
+[workflow.states.approval]
+gate_id = "quick_fix_escape"
+message = "Quick-fix has required 2 iterations. Continue, or re-route to a work-type flow?"
+timeout_seconds = 86400
+
+# ============================================================================
+# AFTER-CHANGE VISUAL SNAPSHOT + PLAYWRIGHT VERIFICATION GATE
+# ============================================================================
+# Kept as tight as the code loop above: snapshot capture is best-effort, but
+# the functional verification is a real gate with its own bounded escape.
+
+[[workflow.states]]
+name = "capture_after_snapshot"
+description = "Capturing 'after' Playwright snapshot"
+max_visits = 3
+loop_enabled = true
+loop_counter = "visual_verification_iterations"
+operation = { id = "capture-after", type = "agent", prompt = """
+    Capture an "after" visual snapshot using Playwright now that the fix is applied.
+    Follow the `playwright-cli` skill.
+
+    Steps:
+    1. Ensure the app is running with the latest code (`aspire run` / `aspire ps`).
+    2. Using `playwright-cli`, navigate to the same page/feature captured in the
+       "before" snapshot (if it exists) at
+       /tmp/nia-visual-evidence/issue-{{issue_id}}/before.yml.
+    3. Save:
+       - `playwright-cli snapshot --filename=/tmp/nia-visual-evidence/issue-{{issue_id}}/after.yml`
+       - `playwright-cli screenshot --filename=/tmp/nia-visual-evidence/issue-{{issue_id}}/after.png`
+       - `playwright-cli close`
+    """, context = ["issue"] }
+on_success = "playwright_verify"
+on_failure = "playwright_verify"
+
+[[workflow.states.escape_conditions]]
+counter_value = 2
+action = "approval"
+approval_gate = "visual_iteration_gate"
+approval_message = "Visual verification has required 2 iterations. This may not be a trivial UI fix — review before continuing."
+
+[[workflow.states]]
+name = "visual_iteration_gate"
+description = "Escape fired — confirm this is still a quick fix"
+on_success = "capture_after_snapshot"
+on_failure = "visual_verification_failed"
+
+[workflow.states.approval]
+gate_id = "quick_fix_visual_escape"
+message = "Visual verification has required 2 iterations. Continue, or treat this as more than a quick fix?"
+timeout_seconds = 86400
+
+# State: Gate — actually drive the browser with Playwright and verify correctness
+[[workflow.states]]
+name = "playwright_verify"
+description = "Gating change on a Playwright functional verification pass"
+operation = { id = "playwright-verify", type = "agent", prompt = """
+    Gate this fix on a Playwright functional verification pass, per the
+    `playwright-cli` skill. A screenshot alone is not sufficient — you must actually
+    drive the browser and confirm behavior.
+
+    Steps:
+    1. Using `playwright-cli`, exercise the user flow this issue touches: click through
+       the changed page, trigger the fixed behavior, etc.
+    2. Confirm the fix behaves as intended and nothing else regressed. Check
+       `playwright-cli console` for new errors/warnings.
+    3. Write a short verification summary to
+       /tmp/nia-visual-evidence/issue-{{issue_id}}/verification-summary.md: what was
+       tested, the outcome, and any console errors.
+    4. Decision:
+       - Everything passes: report VERIFIED and finish this step successfully.
+       - Anything fails or regresses: report the specific failure(s) and STOP (fail
+         this step).
+    """, context = ["issue"], share_session_with = "capture_after_snapshot" }
+on_success = "create_pr"
+on_failure = "fix_verification_issues"
+
+[[workflow.states]]
+name = "fix_verification_issues"
+description = "Fixing issues found by Playwright verification"
+operation = { id = "fix-verification-issues", type = "agent", prompt = """
+    Playwright verification found issues with the current fix. Read
+    /tmp/nia-visual-evidence/issue-{{issue_id}}/verification-summary.md and fix every
+    issue it reports.
+    """, context = ["issue"], share_session_with = "playwright_verify" }
+on_success = "capture_after_snapshot"
+on_failure = "visual_verification_failed"
+
+# ============================================================================
+# PR CREATION — mirrors quick-fix-to-pr.toml's chain, plus visual evidence
+# ============================================================================
+
+[[workflow.states]]
+name = "create_pr"
+description = "Create PR with standard format"
+is_exit_point = true
+operation = { id = "create-pr", type = "agent", prompt = """
+    Create a Pull Request from the current branch to the main branch.
+
+    Steps:
+    1. Get the current branch name using `git branch --show-current`
+    2. CRITICAL - Push local commits before creating PR:
+       a. Check branch status: `git status -sb`
+       b. If status shows "[ahead N, behind M]" (diverged):
+          STOP and report "Cannot push - branch has diverged from remote. Run 'git pull --rebase' to sync with remote first."
+       c. If status shows only "[ahead N]": proceed to push
+       d. Push changes: `git push -u origin <branch_name>`
+       e. Verify push succeeded by checking output
+       f. If push fails, STOP and report the error - do NOT force push
+    3. Create a PR with:
+       - Title: "Fixes #{issue_id} - {branch_name}"
+       - Body: "Fixes #{issue_id}"
+    4. Extract the PR number from the created PR
+    5. Run `nia config set-pr <PR_NUMBER>` to save the PR ID
+    6. Confirm the PR was created successfully
+
+    Error Handling:
+    - If push output contains "non-fast-forward" or "rejected":
+      Report "Push failed - remote branch has new commits you don't have locally. Run 'git pull --rebase origin <branch>' to sync, then try pushing again."
+    - If push output contains "permission" or "denied":
+      Report "Push failed - access denied. Verify repository permissions and authentication."
+    - For any other push failure:
+      Report "Push failed with error: [include full git error message]"
+    - CRITICAL: Never use --force, -f, --force-with-lease, or any forced push flags
+    """, context = ["issue"] }
+on_success = "pr_draft"
+on_failure = "await_pr_intervention"
+
+[[workflow.states]]
+name = "await_pr_intervention"
+description = "PR creation failed - manual intervention"
+on_success = "pr_draft"
+on_failure = "pr_failed"
+
+[workflow.states.approval]
+gate_id = "pr_intervention"
+message = "PR creation failed. Create PR manually, run 'nia config set-pr <PR_ID>', then approve."
+timeout_seconds = 86400
+
+[[workflow.states]]
+name = "pr_draft"
+description = "Generate PR description (lite)"
+is_exit_point = true
+command = { target = "pr", operation = "draft", modifiers = ["lite"] }
+on_success = "pr_publish"
+on_failure = "pr_publish"
+
+[[workflow.states]]
+name = "pr_publish"
+description = "Publish PR description to GitHub"
+is_exit_point = true
+command = { target = "pr", operation = "publish" }
+on_success = "attach_visual_evidence"
+on_failure = "attach_visual_evidence"
+
+# State: Attach the before/after snapshots and Playwright test summary to the PR
+[[workflow.states]]
+name = "attach_visual_evidence"
+description = "Attaching before/after snapshots and Playwright test summary to the PR"
+operation = { id = "attach-visual-evidence", type = "agent", prompt = """
+    Attach the Playwright visual evidence and verification summary to the published PR
+    description.
+
+    Steps:
+    1. Read whichever of these exist:
+       /tmp/nia-visual-evidence/issue-{{issue_id}}/verification-summary.md,
+       before.png, after.png. Skip any that are missing (best-effort capture).
+    2. Upload the available screenshot(s) as GitHub PR attachments (use the
+       `github-pr-media` skill if available, otherwise the standard `gh`/GitHub
+       user-attachments upload flow) and get their rendered `![...](...)` markdown.
+    3. Update the PR body (get current body with
+       `gh pr view {{pr_id}} --json body -q .body`, write the new body to a temp file,
+       then apply it with `gh pr edit {{pr_id}} --body-file PATH`) to append:
+
+       ## Visual Verification
+
+       ### Before
+       <uploaded before image, or "not captured" if missing>
+
+       ### After
+       <uploaded after image, or "not captured" if missing>
+
+       ### Playwright Test Summary
+       <contents of verification-summary.md, or a short written summary if missing>
+
+    4. Clean up the local files under /tmp/nia-visual-evidence/issue-{{issue_id}}/ once
+       attached.
+
+    If uploading fails, still update the PR body with a written summary (without
+    images) and report what couldn't be attached.
+    """, context = ["pr", "issue"], share_session_with = "playwright_verify" }
+on_success = "pr_review"
+on_failure = "pr_review"
+
+[[workflow.states]]
+name = "pr_review"
+description = "Reviewing the pull request (lite)"
+is_exit_point = true
+command = { target = "pr", operation = "review", modifiers = ["lite"] }
+on_success = "await_completion"
+on_failure = "await_completion"
+
+[[workflow.states]]
+name = "await_completion"
+description = "PR ready - confirm completion"
+on_success = "completed"
+on_failure = "completed"
+
+[workflow.states.approval]
+gate_id = "completion_ack"
+message = "Quick-fix workflow complete! PR is ready for review and merge, with before/after snapshots and a Playwright verification summary attached."
+timeout_seconds = 86400
+
+# ============================================================================
+# TERMINAL STATES
+# ============================================================================
+
+[workflow.terminal_states]
+success = ["completed"]
+failed = ["code_iteration_rejected", "visual_verification_failed", "pr_failed"]
+
+[[workflow.states]]
+name = "completed"
+description = "Workflow completed successfully — PR ready for review and merge, with visual evidence attached"
+is_exit_point = true
+
+[[workflow.states]]
+name = "code_iteration_rejected"
+description = "Escape fired and continuation was rejected — likely not a quick fix"
+
+[[workflow.states]]
+name = "visual_verification_failed"
+description = "Playwright verification did not pass and the escape/fix attempt was rejected or unsuccessful"
+
+[[workflow.states]]
+name = "pr_failed"
+description = "PR creation failed after intervention"

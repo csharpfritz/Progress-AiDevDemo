@@ -1,0 +1,185 @@
+# ============================================================================
+# quick-fix-to-pr — selected at the trivial-magnitude cell of routing,
+# regardless of work type. Self-contained: no inheritance, no baseline.
+# ============================================================================
+#
+# - `code create` runs straight from the issue with no plan step, via the
+#   fallback declared in code_create.task.md (Issue #1224): if the plan
+#   artefacts are absent, it derives requirements from the issue directly.
+#   An earlier version of this file inserted an `issue plan --lite` step
+#   in front of `create_code` to satisfy input validation manually — found
+#   unnecessary once #1224 landed the fallback upstream.
+# - the build/test verification tail (`build_check`/`test_check`/
+#   `diagnose_build`/`diagnose_test`) was removed — unproven, never exercised
+#   end-to-end by a shipped workflow — see Issue #1289 for re-adding it
+#   properly.
+# - the entire PR chain (`create_pr` through `completed`) is copied verbatim
+#   from issue-to-pr-lite.toml's proven implementation — no verify_pr_context
+#   check, no auto-merge, ends with the PR open for manual merge. See Issue
+#   #1289 for making `create_pr` deterministic instead of agent-based.
+# - everything else is proven vocabulary already exercised by shipped workflows
+#
+# ============================================================================
+
+workflow_schema_version = "1.0.0"
+
+[workflow]
+name = "quick-fix-to-pr"
+description = "For a trivial, one-line-scale change — a typo, a config value, a tiny fix — with no planning or review phase: generate the code change directly and open a PR, ready for manual review and merge."
+version = "0.1.0"
+required_context = ["issue_id"]
+
+[workflow.initial_state]
+name = "create_code"
+
+[workflow.entry_points]
+create_code = { requires = [] }
+
+# Valid --ends-at targets are marked per-state with `is_exit_point = true`
+# (create_pr, pr_draft, pr_publish, pr_review, completed) — see
+# StateDefinition::is_exit_point.
+
+# ============================================================================
+# CODE GENERATION — bounded tight, escape fires early
+# ============================================================================
+
+# [OK] target/operation, max_visits, escape_conditions are proven vocabulary.
+# max_visits is a generic engine-level backstop (checked independently of the
+# escape_conditions below, see executor.rs::check_circular_state) and every
+# shipped workflow keeps it well above its own escape counter_value so the
+# friendlier custom gate always fires first (issue-to-pr.toml: 30 vs 15).
+# An earlier version of this file set both to 2, which made the two
+# mechanisms fire simultaneously and contributed to Issue #1259.
+[[workflow.states]]
+name = "create_code"
+description = "Generating the fix"
+command = { target = "code", operation = "create" }
+max_visits = 6
+loop_enabled = true
+loop_counter = "code_iterations"
+on_success = "create_pr"
+on_failure = "create_code"  # [P4/F13] native retry, not a copied state
+
+[[workflow.states.escape_conditions]]
+counter_value = 2
+action = "approval"
+approval_gate = "iteration_gate"
+approval_message = "Quick-fix has required 2 iterations to pass code review. This may not be trivial — review before continuing, or re-route to a work-type flow."
+
+[[workflow.states]]
+name = "iteration_gate"
+description = "Escape fired — confirm this is still a quick fix"
+on_success = "create_code"
+on_failure = "code_iteration_rejected"
+
+[workflow.states.approval]
+gate_id = "quick_fix_escape"
+message = "Quick-fix has required 2 iterations. Continue, or re-route to a work-type flow?"
+timeout_seconds = 86400
+
+# ============================================================================
+# PR CREATION — mirrors issue-to-pr-lite.toml's proven chain (#1289)
+# ============================================================================
+
+[[workflow.states]]
+name = "create_pr"
+description = "Create PR with standard format"
+is_exit_point = true
+operation = { id = "create-pr", type = "agent", prompt = """
+    Create a Pull Request from the current branch to the main branch.
+
+    Steps:
+    1. Get the current branch name using `git branch --show-current`
+    2. CRITICAL - Push local commits before creating PR:
+       a. Check branch status: `git status -sb`
+       b. If status shows "[ahead N, behind M]" (diverged):
+          STOP and report "Cannot push - branch has diverged from remote. Run 'git pull --rebase' to sync with remote first."
+       c. If status shows only "[ahead N]": proceed to push
+       d. Push changes: `git push -u origin <branch_name>`
+       e. Verify push succeeded by checking output
+       f. If push fails, STOP and report the error - do NOT force push
+    3. Create a PR with:
+       - Title: "Fixes #{issue_id} - {branch_name}"
+       - Body: "Fixes #{issue_id}"
+    4. Extract the PR number from the created PR
+    5. Run `nia config set-pr <PR_NUMBER>` to save the PR ID
+    6. Confirm the PR was created successfully
+
+    Error Handling:
+    - If push output contains "non-fast-forward" or "rejected":
+      Report "Push failed - remote branch has new commits you don't have locally. Run 'git pull --rebase origin <branch>' to sync, then try pushing again."
+    - If push output contains "permission" or "denied":
+      Report "Push failed - access denied. Verify repository permissions and authentication."
+    - For any other push failure:
+      Report "Push failed with error: [include full git error message]"
+    - CRITICAL: Never use --force, -f, --force-with-lease, or any forced push flags
+    """, context = ["issue"] }
+on_success = "pr_draft"
+on_failure = "await_pr_intervention"
+
+[[workflow.states]]
+name = "await_pr_intervention"
+description = "PR creation failed - manual intervention"
+on_success = "pr_draft"
+on_failure = "pr_failed"
+
+[workflow.states.approval]
+gate_id = "pr_intervention"
+message = "PR creation failed. Create PR manually, run 'nia config set-pr <PR_ID>', then approve."
+timeout_seconds = 86400
+
+[[workflow.states]]
+name = "pr_draft"
+description = "Generate PR description (lite)"
+is_exit_point = true
+command = { target = "pr", operation = "draft", modifiers = ["lite"] }
+on_success = "pr_publish"
+on_failure = "pr_publish"
+
+[[workflow.states]]
+name = "pr_publish"
+description = "Publish PR description to GitHub"
+is_exit_point = true
+command = { target = "pr", operation = "publish" }
+on_success = "pr_review"
+on_failure = "pr_review"
+
+[[workflow.states]]
+name = "pr_review"
+description = "Reviewing the pull request (lite)"
+is_exit_point = true
+command = { target = "pr", operation = "review", modifiers = ["lite"] }
+on_success = "await_completion"
+on_failure = "await_completion"
+
+[[workflow.states]]
+name = "await_completion"
+description = "PR ready - confirm completion"
+on_success = "completed"
+on_failure = "completed"
+
+[workflow.states.approval]
+gate_id = "completion_ack"
+message = "Lite workflow complete! PR is ready for review and merge."
+timeout_seconds = 86400
+
+# ============================================================================
+# TERMINAL STATES
+# ============================================================================
+
+[workflow.terminal_states]
+success = ["completed"]
+failed = ["code_iteration_rejected", "pr_failed"]
+
+[[workflow.states]]
+name = "completed"
+description = "Workflow completed successfully — PR ready for review and merge"
+is_exit_point = true
+
+[[workflow.states]]
+name = "code_iteration_rejected"
+description = "Escape fired and continuation was rejected — likely not a quick fix"
+
+[[workflow.states]]
+name = "pr_failed"
+description = "PR creation failed after intervention"
