@@ -29,7 +29,9 @@ public record UpdateDeliveryOrderRequest(
     DeliveryStatus? Status,
     Guid? DriverId,
     Guid? TruckId,
-    int? GallonsDelivered);
+    int? GallonsDelivered,
+    bool ClearDriver = false,
+    bool ClearTruck = false);
 
 public record CompleteDeliveryOrderRequest(int GallonsDelivered);
 

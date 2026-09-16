@@ -56,10 +56,18 @@ public static class OrderEndpoints
             var order = await db.Orders.FindAsync(id);
             if (order is null) return Results.NotFound();
 
+            if (order.Status is DeliveryStatus.Delivered or DeliveryStatus.Cancelled)
+                return Results.BadRequest($"Cannot modify an order that is already {order.Status}.");
+
             if (request.ScheduledDate is not null) order.ScheduledDate = request.ScheduledDate.Value;
             if (request.Status is not null) order.Status = request.Status.Value;
-            if (request.DriverId is not null) order.DriverId = request.DriverId;
-            if (request.TruckId is not null) order.TruckId = request.TruckId;
+
+            if (request.ClearDriver) order.DriverId = null;
+            else if (request.DriverId is not null) order.DriverId = request.DriverId;
+
+            if (request.ClearTruck) order.TruckId = null;
+            else if (request.TruckId is not null) order.TruckId = request.TruckId;
+
             if (request.GallonsDelivered is not null) order.GallonsDelivered = request.GallonsDelivered;
 
             await db.SaveChangesAsync();
