@@ -8,7 +8,7 @@ public interface IBillingStore
 {
     BillingAccountRecord GetOrSeed(Guid customerId);
     BillingAccountRecord Reset(Guid customerId);
-    PaymentIntentRecord? FindReplay(Guid customerId, string idempotencyKey);
+    PaymentReplayResult FindReplay(CreatePaymentIntentRequest request, string idempotencyKey);
     PaymentApplication ApplyPayment(CreatePaymentIntentRequest request, string? idempotencyKey);
     PaymentIntentRecord? FindIntent(string intentId);
     int AccountCount { get; }
@@ -48,16 +48,15 @@ public sealed class InMemoryBillingStore(
         _intents.TryGetValue(intentId, out var intent) ? intent : null;
 
     // Looked up before request validation so a replayed request never fails validation against a
-    // balance that has already moved since the original, successful attempt.
-    public PaymentIntentRecord? FindReplay(Guid customerId, string idempotencyKey)
+    // balance that has already moved since the original, successful attempt. Validates that the
+    // replayed request carries the same amount/currency/method as the original — a mismatched
+    // payload under a reused key is rejected rather than silently returning the earlier result.
+    public PaymentReplayResult FindReplay(CreatePaymentIntentRequest request, string idempotencyKey)
     {
-        var account = GetOrSeed(customerId);
+        var account = GetOrSeed(request.CustomerId);
         lock (account.Gate)
         {
-            return account.IdempotencyKeys.TryGetValue(idempotencyKey, out var existingId)
-                && _intents.TryGetValue(existingId, out var existing)
-                ? existing
-                : null;
+            return ResolveReplay(account, idempotencyKey, request);
         }
     }
 
@@ -67,14 +66,22 @@ public sealed class InMemoryBillingStore(
 
         lock (account.Gate)
         {
-            if (idempotencyKey is not null
-                && account.IdempotencyKeys.TryGetValue(idempotencyKey, out var existingId)
-                && _intents.TryGetValue(existingId, out var existing))
+            if (idempotencyKey is not null)
             {
-                logger.LogInformation(
-                    "Replaying payment intent {PaymentIntentId} for idempotency key {IdempotencyKey}",
-                    existingId, idempotencyKey);
-                return new PaymentApplication(existing, Replayed: true);
+                var replay = ResolveReplay(account, idempotencyKey, request);
+                switch (replay.Kind)
+                {
+                    case PaymentReplayKind.Matched:
+                        logger.LogInformation(
+                            "Replaying payment intent {PaymentIntentId} for idempotency key {IdempotencyKey}",
+                            replay.Intent!.Id, idempotencyKey);
+                        return PaymentApplication.Succeeded(replay.Intent, replayed: true);
+                    case PaymentReplayKind.Mismatched:
+                        logger.LogWarning(
+                            "Idempotency key {IdempotencyKey} for customer {CustomerId} was reused with different parameters",
+                            idempotencyKey, request.CustomerId);
+                        return PaymentApplication.KeyMismatch;
+                }
             }
 
             var outcome = processor.Evaluate(request.AmountCents);
@@ -116,14 +123,32 @@ public sealed class InMemoryBillingStore(
 
             if (idempotencyKey is not null)
             {
-                account.IdempotencyKeys[idempotencyKey] = intentId;
+                account.IdempotencyKeys[idempotencyKey] = new IdempotencyRecord(
+                    intentId, request.AmountCents, request.Currency, request.PaymentMethod);
             }
 
             logger.LogInformation(
                 "Payment intent {PaymentIntentId} for customer {CustomerId} completed with status {Status}",
                 intent.Id, request.CustomerId, intent.Status);
 
-            return new PaymentApplication(intent, Replayed: false);
+            return PaymentApplication.Succeeded(intent, replayed: false);
         }
+    }
+
+    // Must be called while holding account.Gate.
+    private PaymentReplayResult ResolveReplay(
+        BillingAccountRecord account, string idempotencyKey, CreatePaymentIntentRequest request)
+    {
+        if (!account.IdempotencyKeys.TryGetValue(idempotencyKey, out var record)
+            || !_intents.TryGetValue(record.IntentId, out var existing))
+        {
+            return PaymentReplayResult.NotFound;
+        }
+
+        var matches = record.AmountCents == request.AmountCents
+            && string.Equals(record.Currency, request.Currency, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(record.PaymentMethod, request.PaymentMethod, StringComparison.OrdinalIgnoreCase);
+
+        return matches ? PaymentReplayResult.Matched(existing) : PaymentReplayResult.Mismatched;
     }
 }

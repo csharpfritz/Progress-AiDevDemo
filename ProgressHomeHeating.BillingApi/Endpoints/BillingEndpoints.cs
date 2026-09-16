@@ -57,14 +57,28 @@ public static class BillingEndpoints
             var idempotencyKey = string.IsNullOrWhiteSpace(key) ? null : key;
 
             // A replay is looked up — and returned — before validation, so it never fails against a
-            // balance that has already moved since the original, successful attempt.
-            if (idempotencyKey is not null
-                && store.FindReplay(request.CustomerId, idempotencyKey) is { } replay)
+            // balance that has already moved since the original, successful attempt. A key reused
+            // with different request parameters is rejected rather than replayed (409).
+            if (idempotencyKey is not null)
             {
-                activity?.SetTag("billing.result", replay.Status.ToString());
-                activity?.SetTag("billing.idempotency_replayed", true);
-                http.Response.Headers[BillingConstants.IdempotencyReplayedHeader] = "true";
-                return Results.Ok(replay.ToDto());
+                var replay = store.FindReplay(request, idempotencyKey);
+                if (replay.Kind == PaymentReplayKind.Matched)
+                {
+                    activity?.SetTag("billing.result", replay.Intent!.Status.ToString());
+                    activity?.SetTag("billing.idempotency_replayed", true);
+                    http.Response.Headers[BillingConstants.IdempotencyReplayedHeader] = "true";
+                    return Results.Ok(replay.Intent!.ToDto());
+                }
+
+                if (replay.Kind == PaymentReplayKind.Mismatched)
+                {
+                    var mismatchError = new BillingErrorDto(
+                        BillingErrorCodes.IdempotencyKeyMismatch,
+                        "This idempotency key was already used with different payment parameters.",
+                        BillingConstants.IdempotencyKeyHeader);
+                    activity?.SetTag("billing.result", mismatchError.Code);
+                    return Results.Conflict(mismatchError);
+                }
             }
 
             var account = store.GetOrSeed(request.CustomerId);
@@ -77,7 +91,19 @@ public static class BillingEndpoints
 
             var application = store.ApplyPayment(request, idempotencyKey);
 
-            activity?.SetTag("billing.result", application.Intent.Status.ToString());
+            if (application.Mismatched)
+            {
+                // Rare race: another request recorded a conflicting payload under the same key
+                // between the lookup above and acquiring the account lock in ApplyPayment.
+                var mismatchError = new BillingErrorDto(
+                    BillingErrorCodes.IdempotencyKeyMismatch,
+                    "This idempotency key was already used with different payment parameters.",
+                    BillingConstants.IdempotencyKeyHeader);
+                activity?.SetTag("billing.result", mismatchError.Code);
+                return Results.Conflict(mismatchError);
+            }
+
+            activity?.SetTag("billing.result", application.Intent!.Status.ToString());
             activity?.SetTag("billing.idempotency_replayed", application.Replayed);
 
             if (application.Replayed)
@@ -85,7 +111,7 @@ public static class BillingEndpoints
                 http.Response.Headers[BillingConstants.IdempotencyReplayedHeader] = "true";
             }
 
-            return Results.Ok(application.Intent.ToDto());
+            return Results.Ok(application.Intent!.ToDto());
         });
 
         intents.MapGet("/{id}", (string id, IBillingStore store) =>

@@ -76,6 +76,7 @@ public static class BillingErrorCodes
     public const string LimitInvalid = "limit_invalid";
     public const string CardDeclined = "card_declined";
     public const string ProcessingError = "processing_error";
+    public const string IdempotencyKeyMismatch = "idempotency_key_mismatch";
 }
 
 public static class BillingPaymentMethods
