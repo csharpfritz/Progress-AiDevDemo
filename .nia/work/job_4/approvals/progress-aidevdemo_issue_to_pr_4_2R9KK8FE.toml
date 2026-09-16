@@ -1,0 +1,18 @@
+workflow_id = "progress-aidevdemo_issue_to_pr_4"
+workflow_type = "issue-to-pr"
+current_step = "await_plan_approval"
+created_at = "2026-09-16T09:35:21.316093Z"
+job_dir = "/Users/stanev/Dev/Progress-AiDevDemo/.nia/work/job_4"
+
+[requirement]
+gate_id = "plan_approval"
+message = "Implementation plan is ready. Review & edit before approving for code generation"
+required_code = "2R9KK8FE"
+timeout_seconds = 86400
+
+[state]
+status = "approved"
+requested_at = "2026-09-16T09:35:21.316092Z"
+approved_at = "2026-09-16T09:35:33.332613Z"
+approver_email = "radko@stanev.com"
+approval_code = "2R9KK8FE"
