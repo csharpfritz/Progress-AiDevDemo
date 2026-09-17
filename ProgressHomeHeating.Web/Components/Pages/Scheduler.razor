@@ -1,6 +1,7 @@
 @page "/scheduler"
 @rendermode InteractiveServer
 @inject OperationsApiClient Api
+@using ProgressHomeHeating.Web.Models
 
 <PageTitle>Delivery Scheduler</PageTitle>
 
@@ -16,7 +17,9 @@ else
         <TelerikScheduler Data="@appointments"
                            @bind-Date="@selectedDate"
                            Height="600px"
-                           OnUpdate="@OnAppointmentUpdate">
+                           OnUpdate="@OnAppointmentUpdate"
+                           OnItemClick="@OnAppointmentClick"
+                           OnEdit="@OnAppointmentEdit">
             <SchedulerViews>
                 <SchedulerMonthView />
                 <SchedulerWeekView />
@@ -64,21 +67,192 @@ else
 
             <TelerikButton ThemeColor="primary" OnClick="@SubmitNewOrderAsync">Schedule Delivery</TelerikButton>
     </div>
+
+    <TelerikWindow @bind-Visible="@detailVisible"
+                   Modal="true"
+                   CloseOnOverlayClick="true"
+                   Draggable="true"
+                   Width="640px"
+                   MaxHeight="85vh">
+        <WindowTitle>
+            @(selectedOrder is null ? "Delivery Details" : $"Delivery — {selectedOrder.CustomerName}")
+        </WindowTitle>
+        <WindowActions>
+            <WindowAction Name="Close" />
+        </WindowActions>
+        <WindowContent>
+            @if (selectedOrder is null)
+            {
+                <p class="text-muted mb-0">This delivery is no longer available.</p>
+            }
+            else
+            {
+                @if (!string.IsNullOrEmpty(modalErrorMessage))
+                {
+                    <div class="alert alert-danger">@modalErrorMessage</div>
+                }
+
+                @if (isEditing && editModel is not null)
+                {
+                    var model = editModel;
+
+                    <dl class="row mb-3">
+                        <dt class="col-sm-5">Customer</dt>
+                        <dd class="col-sm-7">@selectedOrder.CustomerName</dd>
+
+                        <dt class="col-sm-5">Tank</dt>
+                        <dd class="col-sm-7">@TankLabelFor(selectedOrder)</dd>
+
+                        <dt class="col-sm-5">Gallons Requested</dt>
+                        <dd class="col-sm-7">@selectedOrder.GallonsRequested gal</dd>
+                    </dl>
+
+                    <div class="mb-2">
+                        <label>Scheduled Date</label>
+                        <TelerikDatePicker @bind-Value="@model.ScheduledDate" Width="100%" />
+                    </div>
+
+                    <div class="mb-2">
+                        <label>Status</label>
+                        <TelerikDropDownList Data="@EditableStatusOptions()"
+                                             TextField="@nameof(StatusOption.Text)"
+                                             ValueField="@nameof(StatusOption.Value)"
+                                             @bind-Value="@model.Status"
+                                             Width="100%" />
+                    </div>
+
+                    <div class="mb-2">
+                        <label>Driver</label>
+                        <TelerikDropDownList Data="@drivers"
+                                             TextField="@nameof(DriverDto.Name)"
+                                             ValueField="@nameof(DriverDto.Id)"
+                                             @bind-Value="@model.DriverId"
+                                             DefaultText="Unassigned"
+                                             Width="100%" />
+                    </div>
+
+                    <div class="mb-2">
+                        <label>Truck</label>
+                        <TelerikDropDownList Data="@trucks"
+                                             TextField="@nameof(TruckDto.Label)"
+                                             ValueField="@nameof(TruckDto.Id)"
+                                             @bind-Value="@model.TruckId"
+                                             DefaultText="Unassigned"
+                                             Width="100%" />
+                    </div>
+
+                    <div class="mb-2">
+                        <label>Gallons Delivered</label>
+                        <TelerikNumericTextBox @bind-Value="@model.GallonsDelivered"
+                                               Min="1"
+                                               Max="2000"
+                                               Enabled="@OrderEditPolicy.IsGallonsDeliveredEditable(model.Status)"
+                                               Width="100%" />
+                        @if (!OrderEditPolicy.IsGallonsDeliveredEditable(model.Status))
+                        {
+                            <small class="text-muted">Editable only when the status is Delivered.</small>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <dl class="row mb-0">
+                        <dt class="col-sm-5">Customer</dt>
+                        <dd class="col-sm-7">@selectedOrder.CustomerName</dd>
+
+                        <dt class="col-sm-5">Tank</dt>
+                        <dd class="col-sm-7">@TankLabelFor(selectedOrder)</dd>
+
+                        <dt class="col-sm-5">Gallons Requested</dt>
+                        <dd class="col-sm-7">@selectedOrder.GallonsRequested gal</dd>
+
+                        <dt class="col-sm-5">Gallons Delivered</dt>
+                        <dd class="col-sm-7">
+                            @(selectedOrder.GallonsDelivered is null ? "—" : $"{selectedOrder.GallonsDelivered} gal")
+                        </dd>
+
+                        <dt class="col-sm-5">Scheduled Date</dt>
+                        <dd class="col-sm-7">@selectedOrder.ScheduledDate.ToString("MMM d, yyyy")</dd>
+
+                        <dt class="col-sm-5">Status</dt>
+                        <dd class="col-sm-7">
+                            <span class="badge bg-@StatusBadgeColor(selectedOrder.Status)">@selectedOrder.Status</span>
+                        </dd>
+
+                        <dt class="col-sm-5">Driver</dt>
+                        <dd class="col-sm-7">@(selectedOrder.DriverName ?? "Unassigned")</dd>
+
+                        <dt class="col-sm-5">Truck</dt>
+                        <dd class="col-sm-7">@(selectedOrder.TruckLabel ?? "Unassigned")</dd>
+                    </dl>
+
+                    @if (!OrderEditPolicy.CanCancel(selectedOrder.Status))
+                    {
+                        <p class="text-muted mt-3 mb-0">@OrderEditPolicy.AlreadyClosedMessage</p>
+                    }
+                }
+            }
+        </WindowContent>
+        <WindowFooter>
+            <div class="d-flex justify-content-end gap-2">
+                @if (isEditing)
+                {
+                    <TelerikButton ThemeColor="primary"
+                                   Enabled="@(!isSaving)"
+                                   OnClick="@SaveOrderEditAsync">
+                        @(isSaving ? "Saving…" : "Save Changes")
+                    </TelerikButton>
+                    <TelerikButton FillMode="outline"
+                                   Enabled="@(!isSaving)"
+                                   OnClick="@CancelEdit">Discard</TelerikButton>
+                }
+                else
+                {
+                    @if (selectedOrder is not null && OrderEditPolicy.CanCancel(selectedOrder.Status))
+                    {
+                        <TelerikButton ThemeColor="error"
+                                       Enabled="@(!isSaving)"
+                                       OnClick="@CancelDeliveryAsync">
+                            @(isSaving ? "Cancelling…" : "Cancel Delivery")
+                        </TelerikButton>
+                    }
+                    <TelerikButton ThemeColor="primary"
+                                   Enabled="@(selectedOrder is not null && !isSaving)"
+                                   OnClick="@BeginEdit">Edit</TelerikButton>
+                    <TelerikButton FillMode="outline"
+                                   Enabled="@(!isSaving)"
+                                   OnClick="@CloseOrderDetails">Close</TelerikButton>
+                }
+            </div>
+        </WindowFooter>
+    </TelerikWindow>
 }
 
 @code {
+    [CascadingParameter]
+    public DialogFactory Dialogs { get; set; } = default!;
+
     private bool loading = true;
     private DateTime selectedDate = DateTime.Today;
     private List<SchedulerAppointment> appointments = [];
     private List<CustomerDto> customers = [];
     private List<OilTankDto> tanks = [];
     private List<DriverDto> drivers = [];
+    private List<TruckDto> trucks = [];
+    private Dictionary<Guid, DeliveryOrderDto> ordersById = [];
     private string? errorMessage;
 
     private Guid newOrderCustomerId;
     private DateTime newOrderDate = DateTime.Today.AddDays(1);
     private double newOrderGallons = 150;
     private Guid? newOrderDriverId;
+
+    private bool detailVisible;
+    private bool isEditing;
+    private bool isSaving;
+    private DeliveryOrderDto? selectedOrder;
+    private OrderDetailEditModel? editModel;
+    private string? modalErrorMessage;
 
     protected override async Task OnInitializedAsync()
     {
@@ -91,8 +265,10 @@ else
         customers = await Api.GetCustomersAsync();
         tanks = await Api.GetTanksAsync();
         drivers = await Api.GetDriversAsync();
+        trucks = await Api.GetTrucksAsync();
 
         var orders = await Api.GetOrdersAsync();
+        ordersById = orders.ToDictionary(o => o.Id);
         appointments = orders.Select(o => new SchedulerAppointment
         {
             OrderId = o.Id,
@@ -101,6 +277,11 @@ else
             End = o.ScheduledDate.ToDateTime(TimeOnly.MinValue),
             IsAllDay = true
         }).ToList();
+
+        if (selectedOrder is not null)
+        {
+            selectedOrder = ordersById.GetValueOrDefault(selectedOrder.Id);
+        }
     }
 
     private async Task OnAppointmentUpdate(SchedulerUpdateEventArgs args)
@@ -145,6 +326,186 @@ else
         newOrderDriverId = null;
         await LoadAsync();
     }
+
+    private void OnAppointmentClick(SchedulerItemClickEventArgs args)
+    {
+        if (args.Item is SchedulerAppointment appt)
+        {
+            OpenOrderDetails(appt.OrderId);
+        }
+    }
+
+    private void OnAppointmentEdit(SchedulerEditEventArgs args)
+    {
+        // Always suppress Telerik's built-in edit form; this page uses its own detail modal.
+        args.IsCancelled = true;
+
+        if (!args.IsNew && args.Item is SchedulerAppointment appt)
+        {
+            OpenOrderDetails(appt.OrderId);
+        }
+    }
+
+    private void OpenOrderDetails(Guid orderId)
+    {
+        if (!ordersById.TryGetValue(orderId, out var order))
+        {
+            errorMessage = "That delivery is no longer available. Refresh the page and try again.";
+            return;
+        }
+
+        selectedOrder = order;
+        editModel = null;
+        isEditing = false;
+        isSaving = false;
+        modalErrorMessage = null;
+        errorMessage = null;
+        detailVisible = true;
+    }
+
+    private void CloseOrderDetails()
+    {
+        detailVisible = false;
+        isEditing = false;
+        isSaving = false;
+        selectedOrder = null;
+        editModel = null;
+        modalErrorMessage = null;
+    }
+
+    private void BeginEdit()
+    {
+        if (selectedOrder is null)
+        {
+            return;
+        }
+
+        editModel = new OrderDetailEditModel(selectedOrder);
+        modalErrorMessage = null;
+        isEditing = true;
+    }
+
+    private void CancelEdit()
+    {
+        editModel = null;
+        modalErrorMessage = null;
+        isEditing = false;
+    }
+
+    private async Task SaveOrderEditAsync()
+    {
+        if (editModel is null || isSaving)
+        {
+            return;
+        }
+
+        modalErrorMessage = OrderEditPolicy.Validate(editModel);
+        if (modalErrorMessage is not null)
+        {
+            return;
+        }
+
+        if (!editModel.HasChanges)
+        {
+            CloseOrderDetails();
+            return;
+        }
+
+        isSaving = true;
+        try
+        {
+            await Api.UpdateOrderAsync(editModel.OrderId, editModel.BuildUpdateRequest());
+            await LoadAsync();
+            CloseOrderDetails();
+        }
+        catch (HttpRequestException ex)
+        {
+            modalErrorMessage = ex.StatusCode == System.Net.HttpStatusCode.NotFound
+                ? "This delivery no longer exists. It may have been removed by another dispatcher or the AI agent."
+                : $"Could not save the delivery: {ex.Message}";
+        }
+        catch (Exception ex)
+        {
+            modalErrorMessage = $"Could not save the delivery: {ex.Message}";
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private async Task CancelDeliveryAsync()
+    {
+        if (selectedOrder is null || isSaving)
+        {
+            return;
+        }
+
+        if (!OrderEditPolicy.CanCancel(selectedOrder.Status))
+        {
+            modalErrorMessage = OrderEditPolicy.AlreadyClosedMessage;
+            return;
+        }
+
+        var confirmed = await Dialogs.ConfirmAsync(
+            OrderEditPolicy.CancelConfirmationMessage(selectedOrder.Status),
+            OrderEditPolicy.CancelDialogTitle,
+            OrderEditPolicy.CancelOkText,
+            OrderEditPolicy.CancelDeclineText);
+
+        if (!confirmed)
+        {
+            return;
+        }
+
+        var orderId = selectedOrder.Id;
+        isSaving = true;
+        try
+        {
+            await Api.UpdateOrderAsync(orderId, OrderDetailEditModel.BuildCancelRequest());
+            await LoadAsync();
+            CloseOrderDetails();
+        }
+        catch (HttpRequestException ex)
+        {
+            modalErrorMessage = ex.StatusCode == System.Net.HttpStatusCode.NotFound
+                ? "This delivery no longer exists. It may have been removed by another dispatcher or the AI agent."
+                : $"Could not cancel the delivery: {ex.Message}";
+        }
+        catch (Exception ex)
+        {
+            modalErrorMessage = $"Could not cancel the delivery: {ex.Message}";
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private static string StatusBadgeColor(DeliveryStatus status) => status switch
+    {
+        DeliveryStatus.Requested => "secondary",
+        DeliveryStatus.Scheduled => "primary",
+        DeliveryStatus.EnRoute => "info",
+        DeliveryStatus.Delivered => "success",
+        DeliveryStatus.Cancelled => "danger",
+        _ => "secondary"
+    };
+
+    private string TankLabelFor(DeliveryOrderDto order)
+    {
+        var tank = tanks.FirstOrDefault(t => t.Id == order.TankId);
+        return tank is null ? "—" : $"{tank.SizeGallons} gal tank";
+    }
+
+    private List<StatusOption> EditableStatusOptions() =>
+        editModel is null
+            ? []
+            : OrderEditPolicy.AllowedTransitions(editModel.OriginalStatus)
+                .Select(s => new StatusOption(s, s.ToString()))
+                .ToList();
+
+    private sealed record StatusOption(DeliveryStatus Value, string Text);
 
     private class SchedulerAppointment
     {
