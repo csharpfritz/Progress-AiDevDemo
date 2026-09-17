@@ -1,0 +1,256 @@
+@using ProgressHomeHeating.Web.Services
+@inject IBillingApiClient Billing
+
+@if (loading)
+{
+    <div class="surface-card" data-testid="billing-loading">
+        <p class="mb-0"><em>Loading billing details...</em></p>
+    </div>
+}
+else if (unavailable)
+{
+    <div class="alert alert-danger" data-testid="billing-unavailable">
+        Billing is temporarily unavailable. Your balance and payment history could not be loaded.
+        Please try again in a moment.
+        <div class="mt-2">
+            <button type="button" class="btn btn-sm btn-outline-danger"
+                    data-testid="billing-retry" @onclick="ReloadAsync">Retry</button>
+        </div>
+    </div>
+}
+else if (account is not null)
+{
+    <div class="surface-card mb-4" data-testid="billing-summary">
+        <div class="row g-4">
+            <div class="col-md-4">
+                <div class="text-muted small">Current balance</div>
+                <div class="fs-2 fw-semibold" data-testid="billing-balance">@FormatCents(account.BalanceCents)</div>
+            </div>
+            <div class="col-md-4">
+                <div class="text-muted small">Status</div>
+                <div class="fs-5" data-testid="billing-status">@StatusText(account.Status)</div>
+            </div>
+            <div class="col-md-4">
+                <div class="text-muted small">Payment due</div>
+                <div class="fs-5" data-testid="billing-due-date">
+                    @(account.DueDate is null ? "Nothing due" : account.DueDate.Value.ToString("MMMM d, yyyy"))
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="surface-card mb-4" data-testid="billing-payment">
+        <h4>Make a payment</h4>
+        @if (account.BalanceCents <= 0)
+        {
+            <p class="text-muted mb-0" data-testid="billing-nothing-due">
+                Your account is paid in full. There is nothing to pay right now.
+            </p>
+        }
+        else
+        {
+            <div class="row g-3 align-items-end">
+                <div class="col-sm-4">
+                    <label class="form-label" for="billing-amount">Amount (USD)</label>
+                    <input id="billing-amount" class="form-control" type="number" step="0.01" min="1"
+                           data-testid="billing-amount-input"
+                           disabled="@submitting" @bind="amount" @bind:event="oninput" />
+                </div>
+                <div class="col-sm-4">
+                    <label class="form-label" for="billing-method">Payment method</label>
+                    <select id="billing-method" class="form-select" data-testid="billing-method-select"
+                            disabled="@submitting" @bind="paymentMethod">
+                        <option value="card">Card</option>
+                        <option value="bank_account">Bank account</option>
+                    </select>
+                </div>
+                <div class="col-sm-4">
+                    <button type="button" class="btn btn-primary w-100"
+                            data-testid="billing-pay-button"
+                            disabled="@submitting" @onclick="SubmitPaymentAsync">
+                        @(submitting ? "Processing..." : "Pay now")
+                    </button>
+                </div>
+            </div>
+            <p class="text-muted small mt-2 mb-0" data-testid="billing-demo-hint">
+                Demo tip: an amount ending in .13 simulates a declined payment, and .42 simulates a
+                processing error. No real money moves and no card details are collected.
+            </p>
+        }
+
+        @if (validationMessage is not null)
+        {
+            <div class="alert alert-warning mt-3 mb-0" data-testid="billing-validation-error">@validationMessage</div>
+        }
+        @if (failureMessage is not null)
+        {
+            <div class="alert alert-danger mt-3 mb-0" data-testid="billing-payment-failure">@failureMessage</div>
+        }
+        @if (successMessage is not null)
+        {
+            <div class="alert alert-success mt-3 mb-0" data-testid="billing-payment-success">@successMessage</div>
+        }
+    </div>
+
+    <div class="surface-card" data-testid="billing-history">
+        <h4>Transaction history</h4>
+        @if (transactions.Count == 0)
+        {
+            <p class="text-muted mb-0" data-testid="billing-empty-history">
+                No billing activity yet. Invoices and payments will appear here once your first
+                delivery is billed.
+            </p>
+        }
+        else
+        {
+            <table class="table table-sm mb-0" data-testid="billing-transactions-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Description</th>
+                        <th>Type</th>
+                        <th>Status</th>
+                        <th class="text-end">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var transaction in transactions)
+                    {
+                        <tr data-testid="billing-transaction-row">
+                            <td>@transaction.CreatedAt.ToLocalTime().ToString("MMM d, yyyy")</td>
+                            <td>@transaction.Description</td>
+                            <td>@transaction.Type</td>
+                            <td>@transaction.Status</td>
+                            <td class="text-end">@FormatCents(transaction.AmountCents)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public Guid CustomerId { get; set; }
+
+    private bool loading = true;
+    private bool unavailable;
+    private bool submitting;
+    private BillingAccountDto? account;
+    private List<BillingTransactionDto> transactions = [];
+    private decimal? amount;
+    private string paymentMethod = BillingPaymentMethods.Card;
+    private string? validationMessage;
+    private string? failureMessage;
+    private string? successMessage;
+    private Guid loadedCustomerId;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (CustomerId == loadedCustomerId) return;
+        loadedCustomerId = CustomerId;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        loading = true;
+        unavailable = false;
+        validationMessage = null;
+        failureMessage = null;
+        successMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            account = await Billing.GetAccountAsync(CustomerId);
+            transactions = [.. await Billing.GetTransactionsAsync(CustomerId)];
+            amount = account.BalanceCents > 0 ? account.BalanceCents / 100m : null;
+        }
+        catch (BillingUnavailableException)
+        {
+            unavailable = true;
+            account = null;
+            transactions = [];
+        }
+        finally
+        {
+            loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SubmitPaymentAsync()
+    {
+        if (submitting || account is null) return;
+
+        validationMessage = null;
+        failureMessage = null;
+        successMessage = null;
+
+        if (amount is null)
+        {
+            validationMessage = "Enter a payment amount.";
+            return;
+        }
+
+        var cents = (long)Math.Round(amount.Value * 100m, MidpointRounding.AwayFromZero);
+        if (cents <= 0)
+        {
+            validationMessage = "Payment amount must be greater than zero.";
+            return;
+        }
+
+        submitting = true;
+        StateHasChanged();
+
+        try
+        {
+            var request = new CreatePaymentIntentRequest(
+                CustomerId, cents, BillingConstants.Currency, paymentMethod);
+            var result = await Billing.SubmitPaymentAsync(request, Guid.NewGuid().ToString());
+
+            if (result.Error is not null)
+            {
+                validationMessage = result.Error.Message;
+            }
+            else if (result.Intent is { Status: PaymentIntentStatus.Failed } failed)
+            {
+                failureMessage = $"Payment {failed.Id} was not completed: {failed.FailureMessage} " +
+                                 $"(code: {failed.FailureCode}). Your balance is unchanged.";
+            }
+            else if (result.Intent is { } succeeded)
+            {
+                successMessage = $"Payment {succeeded.Id} of {FormatCents(succeeded.AmountCents)} succeeded. " +
+                                 $"Status: {succeeded.Status}.";
+                account = await Billing.GetAccountAsync(CustomerId);
+                transactions = [.. await Billing.GetTransactionsAsync(CustomerId)];
+                amount = account.BalanceCents > 0 ? account.BalanceCents / 100m : null;
+            }
+        }
+        catch (BillingUnavailableException)
+        {
+            failureMessage = "Billing is temporarily unavailable. The payment was not submitted.";
+        }
+        finally
+        {
+            submitting = false;
+            StateHasChanged();
+        }
+    }
+
+    private static readonly System.Globalization.CultureInfo UsdCulture =
+        System.Globalization.CultureInfo.GetCultureInfo("en-US");
+
+    // BillingConstants.Currency is always "usd", so formatting is pinned to en-US regardless of the
+    // host's system culture (avoids rendering e.g. "50,00 €" on non-US locales).
+    private static string FormatCents(long cents) => (cents / 100m).ToString("C", UsdCulture);
+
+    private static string StatusText(BillingAccountStatus status) => status switch
+    {
+        BillingAccountStatus.PaidInFull => "Paid in full",
+        BillingAccountStatus.DueSoon => "Due soon",
+        BillingAccountStatus.PastDue => "Past due",
+        _ => "Current"
+    };
+}

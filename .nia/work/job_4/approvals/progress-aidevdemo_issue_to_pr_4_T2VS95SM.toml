@@ -1,0 +1,18 @@
+workflow_id = "progress-aidevdemo_issue_to_pr_4"
+workflow_type = "issue-to-pr"
+current_step = "await_draft_approval"
+created_at = "2026-09-16T09:17:38.091977Z"
+job_dir = "/Users/stanev/Dev/Progress-AiDevDemo/.nia/work/job_4"
+
+[requirement]
+gate_id = "draft_approval"
+message = "Issue draft is ready. Please review & edit issue before approving for planning"
+required_code = "T2VS95SM"
+timeout_seconds = 86400
+
+[state]
+status = "approved"
+requested_at = "2026-09-16T09:17:38.091977Z"
+approved_at = "2026-09-16T09:17:52.946695Z"
+approver_email = "radko@stanev.com"
+approval_code = "T2VS95SM"

@@ -21,6 +21,11 @@ builder.Services.AddHttpClient<AgentApiClient>(client =>
     client.BaseAddress = new Uri("http://agentapi");
 });
 
+builder.Services.AddHttpClient<IBillingApiClient, BillingApiClient>(client =>
+{
+    client.BaseAddress = new Uri("http://billingapi");
+});
+
 var app = builder.Build();
 
 app.MapDefaultEndpoints();

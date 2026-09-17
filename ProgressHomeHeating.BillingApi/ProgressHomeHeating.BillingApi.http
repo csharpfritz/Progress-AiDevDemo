@@ -1,0 +1,50 @@
+@host = http://localhost:5311
+@customerId = 00000000-0000-0000-0000-000000000001
+
+### Retrieve billing account (balance, status, due date)
+GET {{host}}/v1/billing_accounts/{{customerId}}
+Accept: application/json
+
+### List transactions
+GET {{host}}/v1/billing_accounts/{{customerId}}/transactions?limit=20
+Accept: application/json
+
+### Submit a successful payment ($25.00)
+POST {{host}}/v1/payment_intents
+Content-Type: application/json
+Idempotency-Key: 11111111-1111-1111-1111-111111111111
+
+{
+  "customerId": "{{customerId}}",
+  "amountCents": 2500,
+  "currency": "usd",
+  "paymentMethod": "card"
+}
+
+### Simulated decline — amount ends in .13
+POST {{host}}/v1/payment_intents
+Content-Type: application/json
+
+{
+  "customerId": "{{customerId}}",
+  "amountCents": 2513,
+  "currency": "usd",
+  "paymentMethod": "card"
+}
+
+### Validation failure — zero amount
+POST {{host}}/v1/payment_intents
+Content-Type: application/json
+
+{
+  "customerId": "{{customerId}}",
+  "amountCents": 0,
+  "currency": "usd",
+  "paymentMethod": "card"
+}
+
+### Reset one account to its deterministic seed state
+POST {{host}}/v1/billing_accounts/{{customerId}}/reset
+
+### Health
+GET {{host}}/health
