@@ -33,10 +33,24 @@ public class OperationsApiClient(HttpClient http)
         return await response.Content.ReadFromJsonAsync<DeliveryOrderDto>(ct);
     }
 
+    public async Task<DeliveryOrderDto?> GetOrderAsync(Guid id, CancellationToken ct = default)
+    {
+        var response = await http.GetAsync($"/api/orders/{id}", ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<DeliveryOrderDto>(ct);
+    }
+
     public async Task<DeliveryOrderDto?> UpdateOrderAsync(Guid id, UpdateDeliveryOrderRequest request, CancellationToken ct = default)
     {
         var response = await http.PutAsJsonAsync($"/api/orders/{id}", request, ct);
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var detail = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(string.IsNullOrWhiteSpace(detail)
+                ? $"Update failed ({(int)response.StatusCode})."
+                : detail);
+        }
         return await response.Content.ReadFromJsonAsync<DeliveryOrderDto>(ct);
     }
 
