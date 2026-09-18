@@ -52,7 +52,24 @@ else
                 </ul>
             </div>
             <div class="surface-card flex-grow-1">
-                <h4>Local Weather — 5-Day Report</h4>
+                <div class="weather-card-header">
+                    <h4 class="mb-0">Local Weather — 5-Day Report</h4>
+                    <TelerikButtonGroup SelectionMode="ButtonGroupSelectionMode.Single"
+                                        Class="weather-unit-toggle">
+                        <ButtonGroupToggleButton Selected="@(unit == TemperatureUnit.Fahrenheit)"
+                                                 OnClick="@(() => unit = TemperatureUnit.Fahrenheit)"
+                                                 Title="Show temperatures in Fahrenheit"
+                                                 AriaLabel="Show temperatures in Fahrenheit">
+                            °F
+                        </ButtonGroupToggleButton>
+                        <ButtonGroupToggleButton Selected="@(unit == TemperatureUnit.Celsius)"
+                                                 OnClick="@(() => unit = TemperatureUnit.Celsius)"
+                                                 Title="Show temperatures in Celsius"
+                                                 AriaLabel="Show temperatures in Celsius">
+                            °C
+                        </ButtonGroupToggleButton>
+                    </TelerikButtonGroup>
+                </div>
                 <div class="weather-strip">
                     @foreach (var day in forecast)
                     {
@@ -61,8 +78,8 @@ else
                             <div class="weather-icon" aria-hidden="true">@day.Icon</div>
                             <div class="weather-condition">@day.Condition</div>
                             <div class="weather-temps">
-                                <span class="weather-high">@day.HighF&deg;</span>
-                                <span class="weather-low">@day.LowF&deg;</span>
+                                <span class="weather-high">@FormatTemp(day.HighF)@UnitSymbol</span>
+                                <span class="weather-low">@FormatTemp(day.LowF)@UnitSymbol</span>
                             </div>
                         </div>
                     }
@@ -92,6 +109,7 @@ else
     private List<OilTankDto> lowTanks = [];
     private List<DeliveryOrderDto> upcomingOrders = [];
     private List<WeatherDayForecast> forecast = [];
+    private TemperatureUnit unit = TemperatureUnit.Fahrenheit;
 
     protected override async Task OnInitializedAsync()
     {
@@ -128,4 +146,21 @@ else
     }
 
     private sealed record WeatherDayForecast(string DayName, string Icon, string Condition, int HighF, int LowF);
+
+    private string UnitSymbol => unit == TemperatureUnit.Celsius ? "°C" : "°F";
+
+    // Pure display transform: forecast data is always stored in Fahrenheit.
+    private string FormatTemp(int fahrenheit) => unit switch
+    {
+        TemperatureUnit.Celsius =>
+            ((int)Math.Round((fahrenheit - 32) * 5d / 9d, MidpointRounding.AwayFromZero))
+                .ToString(System.Globalization.CultureInfo.InvariantCulture),
+        _ => fahrenheit.ToString(System.Globalization.CultureInfo.InvariantCulture)
+    };
+
+    private enum TemperatureUnit
+    {
+        Fahrenheit,
+        Celsius
+    }
 }

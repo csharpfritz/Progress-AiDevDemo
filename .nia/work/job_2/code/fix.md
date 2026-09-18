@@ -1,0 +1,2 @@
+InvalidOperationException: Object of type 'Telerik.Blazor.Components.ButtonGroupToggleButton' does not have a property matching the name 'aria-label'.
+Microsoft.AspNetCore.Components.Reflection.ComponentProperties.ThrowForUnknownIncomingParameterName(Type targetType, string parameterName)

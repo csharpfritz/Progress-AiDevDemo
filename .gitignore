@@ -6,6 +6,10 @@
 # dotenv files
 .env
 
+# Nia workflow approvals and traces
+.nia/work/*/approvals/
+.nia/work/*/traces/
+
 # User-specific files
 *.rsuser
 *.suo
